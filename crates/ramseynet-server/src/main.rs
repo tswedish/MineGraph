@@ -1,7 +1,4 @@
-use axum::{routing::get, Json, Router};
 use clap::Parser;
-use serde_json::{json, Value};
-use tower_http::cors::CorsLayer;
 
 #[derive(Parser, Debug)]
 #[command(name = "ramseynet-server", about = "RamseyNet protocol server")]
@@ -15,22 +12,6 @@ struct Config {
     db_path: String,
 }
 
-async fn health() -> Json<Value> {
-    Json(json!({
-        "name": "RamseyNet",
-        "version": ramseynet_types::PROTOCOL_VERSION,
-        "status": "ok"
-    }))
-}
-
-async fn list_challenges() -> Json<Value> {
-    Json(json!({ "challenges": [] }))
-}
-
-async fn list_records() -> Json<Value> {
-    Json(json!({ "records": [] }))
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -42,12 +23,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::parse();
 
-    let app = Router::new()
-        .route("/", get(health))
-        .route("/api/health", get(health))
-        .route("/api/challenges", get(list_challenges))
-        .route("/api/records", get(list_records))
-        .layer(CorsLayer::permissive());
+    let app = ramseynet_server::create_router();
 
     let addr = format!("0.0.0.0:{}", config.port);
     tracing::info!("RamseyNet server listening on {addr}");

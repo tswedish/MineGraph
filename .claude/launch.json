@@ -10,7 +10,7 @@
     {
       "name": "web-dev",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["web/node_modules/vite/bin/vite.js", "dev", "--config", "web/vite.config.ts", "--port", "5173"],
+      "runtimeArgs": ["web/dev.mjs", "5173"],
       "port": 5173
     }
   ]

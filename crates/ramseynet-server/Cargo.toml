@@ -19,3 +19,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+ramseynet-graph = { path = "../ramseynet-graph" }
+ramseynet-verifier = { path = "../ramseynet-verifier" }
