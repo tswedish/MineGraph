@@ -144,13 +144,7 @@ export async function submitGraph(req: SubmitRequest): Promise<SubmitResponse> {
  * Connect to the OESP-1 event stream.
  * Returns a WebSocket that emits JSON `EventMessage` frames.
  */
-export function connectEvents(afterSeq = 0): WebSocket {
+export function connectEvents(): WebSocket {
 	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-	const ws = new WebSocket(`${protocol}//${window.location.host}${BASE}/events`);
-	ws.onopen = () => {
-		if (afterSeq > 0) {
-			ws.send(JSON.stringify({ after_seq: afterSeq }));
-		}
-	};
-	return ws;
+	return new WebSocket(`${protocol}//${window.location.host}${BASE}/events`);
 }

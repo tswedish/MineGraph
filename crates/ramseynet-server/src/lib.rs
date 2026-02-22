@@ -382,26 +382,25 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
         }
     }
 
+    // Subscribe before replay so no live events are missed during catch-up.
+    // The client deduplicates by seq, so overlap between replay and live is safe.
+    let mut rx = state.event_tx.subscribe();
+
     // Replay missed events from DB
-    if after_seq >= 0 {
-        let ledger = state.ledger.clone();
-        let seq = after_seq;
-        if let Ok(events) =
-            tokio::task::spawn_blocking(move || ledger.list_events_since(seq, 1000))
-                .await
-                .unwrap()
-        {
-            for event in events {
-                let msg = serde_json::to_string(&event).unwrap();
-                if socket.send(Message::Text(msg.into())).await.is_err() {
-                    return;
-                }
+    let ledger = state.ledger.clone();
+    let seq = after_seq;
+    if let Ok(events) =
+        tokio::task::spawn_blocking(move || ledger.list_events_since(seq, 1000))
+            .await
+            .unwrap()
+    {
+        for event in events {
+            let msg = serde_json::to_string(&event).unwrap();
+            if socket.send(Message::Text(msg.into())).await.is_err() {
+                return;
             }
         }
     }
-
-    // Subscribe to live events
-    let mut rx = state.event_tx.subscribe();
     loop {
         match rx.recv().await {
             Ok(event) => {

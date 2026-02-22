@@ -15,6 +15,8 @@ function handleMessage(ev: MessageEvent) {
 		// untrack prevents this async callback from accidentally registering
 		// as a dependency or interfering with Svelte's scheduler during navigation
 		untrack(() => {
+			// Deduplicate by seq — guards against server replay overlap
+			if (events.some((e) => e.seq === msg.seq)) return;
 			events = [msg, ...events].slice(0, MAX_EVENTS);
 		});
 	} catch {
@@ -45,11 +47,16 @@ function scheduleReconnect() {
 export function connect() {
 	if (ws) return;
 	const lastSeq = events.length > 0 ? events[0].seq : 0;
-	ws = connectEvents(lastSeq);
-	ws.onmessage = handleMessage;
-	ws.onopen = handleOpen;
-	ws.onclose = handleClose;
-	ws.onerror = () => ws?.close();
+	const socket = connectEvents();
+	ws = socket;
+	socket.onmessage = handleMessage;
+	socket.onopen = () => {
+		handleOpen();
+		// Send after_seq so the server replays only events we haven't seen
+		if (lastSeq > 0) socket.send(JSON.stringify({ after_seq: lastSeq }));
+	};
+	socket.onclose = handleClose;
+	socket.onerror = () => socket.close();
 }
 
 export function disconnect() {
