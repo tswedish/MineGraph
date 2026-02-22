@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { getChallenge, type Challenge, type Record, type RgxfJson } from '$lib/api';
 	import MatrixView from '$lib/components/MatrixView.svelte';
 	import CircleLayout from '$lib/components/CircleLayout.svelte';
@@ -12,23 +12,32 @@
 	let error = $state('');
 
 	$effect(() => {
-		const id = $page.params.id;
+		const id = page.params.id;
 		loading = true;
 		error = '';
+		challenge = null;
+		record = null;
+		recordGraph = null;
+
+		let cancelled = false;
 
 		getChallenge(id)
 			.then((data) => {
+				if (cancelled) return;
 				challenge = data.challenge;
 				record = data.record;
 				// Server may include record_graph (added in Phase 4)
 				recordGraph = (data as any).record_graph ?? null;
 			})
 			.catch((e) => {
+				if (cancelled) return;
 				error = e instanceof Error ? e.message : 'Failed to load challenge';
 			})
 			.finally(() => {
-				loading = false;
+				if (!cancelled) loading = false;
 			});
+
+		return () => { cancelled = true; };
 	});
 </script>
 

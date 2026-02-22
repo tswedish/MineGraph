@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import { connectEvents, type EventMessage } from '$lib/api';
 
 const MAX_EVENTS = 50;
@@ -11,7 +12,11 @@ let reconnectDelay = 1000;
 function handleMessage(ev: MessageEvent) {
 	try {
 		const msg: EventMessage = JSON.parse(ev.data);
-		events = [msg, ...events].slice(0, MAX_EVENTS);
+		// untrack prevents this async callback from accidentally registering
+		// as a dependency or interfering with Svelte's scheduler during navigation
+		untrack(() => {
+			events = [msg, ...events].slice(0, MAX_EVENTS);
+		});
 	} catch {
 		// ignore malformed messages
 	}
