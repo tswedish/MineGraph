@@ -57,7 +57,7 @@ bash scripts/wsl-dev.sh seed
 
 This creates three challenges (R(3,3), R(3,4), R(4,4)) and submits four graphs:
 - **C5** → R(3,3) — accepted, sets record at n=5
-- **Petersen graph** → R(3,4) — accepted, sets record at n=10
+- **Wagner graph** → R(3,4) — accepted, sets record at n=8
 - **K5** → R(3,3) — rejected (clique_found, witness [0,1,2])
 - **E5 (empty)** → R(3,3) — rejected (independent_set_found, witness [0,1,2])
 
@@ -100,7 +100,7 @@ Click **"View challenges"** or the **Challenges** nav link.
 **What to verify:**
 - [ ] Three challenge cards appear: R(3,3), R(3,4), R(4,4)
 - [ ] R(3,3) shows `n = 5` in green (the C5 record)
-- [ ] R(3,4) shows `n = 10` in green (the Petersen graph record)
+- [ ] R(3,4) shows `n = 8` in green (the Wagner graph record)
 - [ ] R(4,4) shows `no submissions` (no record yet)
 - [ ] Each card shows its challenge_id and description
 - [ ] Cards show truncated CIDs for challenges with records
@@ -121,15 +121,15 @@ Click the **R(3,3)** card.
 - [ ] Scrolling down reveals the **Submit a Graph** form
 - [ ] The challenge dropdown is pre-selected to `ramsey:3:3:v1`
 
-### 3.4 Challenge Detail — R(3,4) with Petersen Graph
+### 3.4 Challenge Detail — R(3,4) with Wagner Graph
 
 Navigate to `/challenges/ramsey:3:4:v1` (use the back link → click R(3,4) card).
 
 **What to verify:**
-- [ ] Best n = 10 with the Petersen graph CID
-- [ ] Matrix View shows a 10×10 grid (the Petersen graph adjacency)
-- [ ] Circle Layout shows 10 vertices in a circle with the 3-regular edge pattern
-- [ ] The Petersen graph has a distinctive symmetric pattern in both views
+- [ ] Best n = 8 with the Wagner graph CID
+- [ ] Matrix View shows an 8×8 grid (the Wagner graph adjacency)
+- [ ] Circle Layout shows 8 vertices in a circle with the 3-regular edge pattern
+- [ ] The Wagner graph has a symmetric pattern (circulant structure) in both views
 
 ### 3.5 Submit Page (`/submit`)
 
@@ -282,7 +282,8 @@ These graphs are available in `test-vectors/small_graphs.json`:
 | C5 (5-cycle) | 5 | `mUA=` | accepted | accepted | omega=2, alpha=2 |
 | K5 (complete) | 5 | `/8A=` | rejected | rejected | omega=5, witness [0,1,2] |
 | E5 (empty) | 5 | `AAA=` | rejected | rejected | alpha=5, witness [0,1,2] |
-| Petersen | 10 | `mEREiCzQ` | accepted | accepted | omega=2, alpha=4, 3-regular |
+| Petersen | 10 | `mEREiCzQ` | — | rejected | omega=2, alpha=4 (alpha not < 4) |
+| Wagner | 8 | `kySmUA==` | — | accepted | omega=2, alpha=3, 3-regular |
 | K4 (complete) | 4 | `/A==` | rejected | — | omega=4, witness [0,1,2] |
 
 To submit any of these via the web UI, paste the RGXF JSON in this format:

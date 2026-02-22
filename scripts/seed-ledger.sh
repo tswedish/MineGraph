@@ -56,32 +56,17 @@ post submit \
   '{"challenge_id":"ramsey:3:3:v1","graph":{"n":5,"encoding":"utri_b64_v1","bits_b64":"mUA="}}' \
   "C5 → R(3,3) [expect: accepted, n=5]"
 
-# Petersen graph (10 vertices) for R(3,4): omega=2, alpha=4 → k-clique < 3, ell-indep < 4
-# 3-regular, girth 5 — should be accepted for R(3,4)
-# Edges: 0-1,0-4,0-5, 1-2,1-6, 2-3,2-7, 3-4,3-8, 4-9, 5-7,5-8, 6-8,6-9, 7-9
-# Upper-tri pairs for n=10: 45 bits
-# Row 0: (0,1)=1 (0,2)=0 (0,3)=0 (0,4)=1 (0,5)=1 (0,6)=0 (0,7)=0 (0,8)=0 (0,9)=0
-# Row 1: (1,2)=1 (1,3)=0 (1,4)=0 (1,5)=0 (1,6)=1 (1,7)=0 (1,8)=0 (1,9)=0
-# Row 2: (2,3)=1 (2,4)=0 (2,5)=0 (2,6)=0 (2,7)=1 (2,8)=0 (2,9)=0
-# Row 3: (3,4)=1 (3,5)=0 (3,6)=0 (3,7)=0 (3,8)=1 (3,9)=0
-# Row 4: (4,5)=0 (4,6)=0 (4,7)=0 (4,8)=0 (4,9)=1
-# Row 5: (5,6)=0 (5,7)=1 (5,8)=1 (5,9)=0
-# Row 6: (6,7)=0 (6,8)=1 (6,9)=1
-# Row 7: (7,8)=0 (7,9)=1
-# Row 8: (8,9)=0
-# Concat: 1 0011 0000 | 1 0001 000 | 1 00010 00 | 100010 0 | 00001 | 0110 | 011 | 01 | 0
-# = 10011 00001 00010 001000 10001 00100 00001 01100 11010 000000
-# Let me recalculate byte by byte:
-# bit 0-7:   1,0,0,1,1,0,0,0 = 0x98
-# bit 8-15:  0,1,0,0,0,1,0,0 = 0x44
-# bit 16-23: 0,1,0,0,0,1,0,0 = 0x44
-# bit 24-31: 1,0,0,0,1,0,0,0 = 0x88
-# bit 32-39: 0,0,1,0,1,1,0,0 = 0x2C
-# bit 40-44: 1,1,0,1,0        = 0xD0 (padded with 000)
-# base64 of [0x98,0x44,0x44,0x88,0x2C,0xD0] = mEREiCzQ
+# Wagner graph (8 vertices) for R(3,4): circulant C(8, {1, 4})
+# 3-regular, triangle-free — omega=2, alpha=3
+# omega < 3 ✓, alpha < 4 ✓ → accepted
+# Edges: i-(i+1)%8 and i-(i+4)%8 for each vertex i
+# Upper-tri pairs (i<j): (0,1)=1 (0,4)=1 (0,7)=1 (1,2)=1 (1,5)=1
+#   (2,3)=1 (2,6)=1 (3,4)=1 (3,7)=1 (4,5)=1 (5,6)=1 (6,7)=1
+# 28 bits: 1001001 100100 10010 1001 100 10 1
+# Bytes: 0x93 0x24 0xA6 0x50 → base64: kySmUA==
 post submit \
-  '{"challenge_id":"ramsey:3:4:v1","graph":{"n":10,"encoding":"utri_b64_v1","bits_b64":"mEREiCzQ"}}' \
-  "Petersen graph → R(3,4) [expect: accepted, n=10]"
+  '{"challenge_id":"ramsey:3:4:v1","graph":{"n":8,"encoding":"utri_b64_v1","bits_b64":"kySmUA=="}}' \
+  "Wagner graph → R(3,4) [expect: accepted, n=8]"
 
 # K5 (complete on 5 vertices) for R(3,3) — should be REJECTED (has triangle)
 # All 10 upper-tri bits = 1 → 11111111 11 → 0xFF 0xC0 → base64: /8A=

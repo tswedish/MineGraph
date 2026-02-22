@@ -35,11 +35,22 @@
   },
   {
     "name": "Petersen",
-    "description": "Petersen graph — 10 vertices, 3-regular, girth 5. omega=2, alpha=4.",
+    "description": "Petersen graph — 10 vertices, 3-regular, girth 5. omega=2, alpha=4. NOT a valid R(3,4) witness (alpha=4 is not < 4).",
     "n": 10,
     "edges": [[0,1],[0,4],[0,5],[1,2],[1,6],[2,3],[2,7],[3,4],[3,8],[4,9],[5,7],[5,8],[6,8],[6,9],[7,9]],
     "rgxf": {"n": 10, "encoding": "utri_b64_v1", "bits_b64": "mEREiCzQ"},
     "properties": {"omega": 2, "alpha": 4, "edge_count": 15},
+    "expected": {
+      "R(3,4)": {"verdict": "rejected", "reason": "independent_set_found"}
+    }
+  },
+  {
+    "name": "Wagner",
+    "description": "Wagner graph — circulant C(8,{1,4}), 8 vertices, 3-regular, triangle-free. omega=2, alpha=3. Valid R(3,4) witness (best possible, since R(3,4)=9).",
+    "n": 8,
+    "edges": [[0,1],[0,4],[0,7],[1,2],[1,5],[2,3],[2,6],[3,4],[3,7],[4,5],[5,6],[6,7]],
+    "rgxf": {"n": 8, "encoding": "utri_b64_v1", "bits_b64": "kySmUA=="},
+    "properties": {"omega": 2, "alpha": 3, "edge_count": 12},
     "expected": {
       "R(3,4)": "accepted"
     }

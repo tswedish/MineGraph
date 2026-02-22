@@ -93,4 +93,62 @@ mod tests {
         assert_eq!(witness.len(), 3);
         assert_eq!(witness, vec![0, 1, 2]);
     }
+
+    /// Wagner graph (n=8, 3-regular, circulant C(8,{1,4})) should be accepted for R(3,4).
+    /// Triangle-free (omega=2) and alpha=3, so omega < 3 and alpha < 4.
+    #[test]
+    fn wagner_accepted_for_r34() {
+        let mut g = AdjacencyMatrix::new(8);
+        // Circulant C(8, {1, 4}): each vertex i connects to (i±1)%8 and (i+4)%8
+        for i in 0..8 {
+            g.set_edge(i, (i + 1) % 8, true);
+            g.set_edge(i, (i + 4) % 8, true);
+        }
+        let cid = compute_cid(&g);
+        let result = verify_ramsey(&g, 3, 4, &cid);
+        assert_eq!(result.verdict, Verdict::Accepted, "Wagner graph should be accepted for R(3,4): {:?}", result);
+        assert!(result.witness.is_none());
+    }
+
+    /// Wagner graph RGXF round-trip: verify the base64 encoding matches.
+    #[test]
+    fn wagner_rgxf_encoding() {
+        use ramseynet_graph::rgxf;
+
+        let mut g = AdjacencyMatrix::new(8);
+        for i in 0..8 {
+            g.set_edge(i, (i + 1) % 8, true);
+            g.set_edge(i, (i + 4) % 8, true);
+        }
+        let json = rgxf::to_json(&g);
+        assert_eq!(json.bits_b64, "kySmUA==");
+        assert_eq!(json.n, 8);
+
+        // Round-trip decode
+        let decoded = rgxf::from_json(&json).unwrap();
+        assert_eq!(decoded.n(), 8);
+        for i in 0..8 {
+            assert!(decoded.edge(i, (i + 1) % 8), "missing edge {}-{}", i, (i + 1) % 8);
+            assert!(decoded.edge(i, (i + 4) % 8), "missing edge {}-{}", i, (i + 4) % 8);
+        }
+    }
+
+    /// Petersen graph (n=10) should be REJECTED for R(3,4): alpha=4 which is not < 4.
+    #[test]
+    fn petersen_rejected_for_r34() {
+        let mut g = AdjacencyMatrix::new(10);
+        // Outer cycle
+        for i in 0..5 { g.set_edge(i, (i + 1) % 5, true); }
+        // Inner pentagram
+        for i in 0..5 { g.set_edge(5 + i, 5 + (i + 2) % 5, true); }
+        // Spokes
+        for i in 0..5 { g.set_edge(i, i + 5, true); }
+
+        let cid = compute_cid(&g);
+        let result = verify_ramsey(&g, 3, 4, &cid);
+        assert_eq!(result.verdict, Verdict::Rejected);
+        assert_eq!(result.reason.as_deref(), Some("independent_set_found"));
+        let witness = result.witness.unwrap();
+        assert_eq!(witness.len(), 4, "Petersen graph has alpha=4, witness should be size 4");
+    }
 }
