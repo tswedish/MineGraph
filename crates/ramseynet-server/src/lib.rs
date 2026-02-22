@@ -136,9 +136,23 @@ async fn get_challenge(
         .unwrap()
         .map_err(map_ledger_error)?;
 
+    // If there's a record, fetch the graph's RGXF JSON for visualization
+    let record_graph: Option<Value> = if let Some(ref r) = record {
+        let ledger3 = state.ledger.clone();
+        let best_cid = r.best_cid.clone();
+        let rgxf_str = tokio::task::spawn_blocking(move || ledger3.get_submission_rgxf(&best_cid))
+            .await
+            .unwrap()
+            .map_err(map_ledger_error)?;
+        rgxf_str.and_then(|s| serde_json::from_str(&s).ok())
+    } else {
+        None
+    };
+
     Ok(Json(json!({
         "challenge": challenge,
         "record": record,
+        "record_graph": record_graph,
     })))
 }
 

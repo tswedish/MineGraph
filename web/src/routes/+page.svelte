@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EventFeed from '$lib/components/EventFeed.svelte';
+
 	let status = $state<string>('connecting...');
 
 	async function checkHealth() {
@@ -47,6 +49,10 @@
 		<p>Track the evolving frontier of best-known Ramsey numbers.</p>
 		<a href="/challenges">View records</a>
 	</div>
+</div>
+
+<div class="events-section">
+	<EventFeed maxEvents={15} />
 </div>
 
 <style>
@@ -116,5 +122,9 @@
 	.card a {
 		font-size: 0.875rem;
 		font-weight: 500;
+	}
+
+	.events-section {
+		margin-top: 2.5rem;
 	}
 </style>

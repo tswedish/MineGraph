@@ -227,6 +227,22 @@ impl Ledger {
     }
 }
 
+// ── Submission queries ───────────────────────────────────────────────
+
+impl Ledger {
+    /// Get the RGXF JSON string for a submission by CID.
+    pub fn get_submission_rgxf(&self, cid: &str) -> Result<Option<String>, LedgerError> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT rgxf_json FROM graph_submissions WHERE graph_cid = ?1",
+            params![cid],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(LedgerError::Db)
+    }
+}
+
 // ── Event operations ─────────────────────────────────────────────────
 
 impl Ledger {

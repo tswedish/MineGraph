@@ -70,8 +70,20 @@ case "$cmd" in
     echo "=== Starting server on :3001 ==="
     cargo run -p ramseynet-server "$@"
     ;;
+  server-log)
+    LOGDIR="$REPO/logs"
+    mkdir -p "$LOGDIR"
+    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+    LOGFILE="$LOGDIR/server-$TIMESTAMP.log"
+    echo "=== Starting server on :3001 (logging to $LOGFILE) ==="
+    RUST_LOG=info cargo run -p ramseynet-server "$@" 2>&1 | tee "$LOGFILE"
+    ;;
+  seed)
+    echo "=== Seeding ledger ==="
+    bash "$REPO/scripts/seed-ledger.sh" "$@"
+    ;;
   *)
-    echo "Usage: wsl-dev.sh {test|clippy|build|web|ci|sync|server}"
+    echo "Usage: wsl-dev.sh {test|clippy|build|web|ci|sync|server|server-log|seed}"
     exit 1
     ;;
 esac
