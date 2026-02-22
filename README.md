@@ -15,18 +15,25 @@ RamseyNet is a peer-to-peer network where anyone can propose and verify Ramsey g
 
 ### Build & Run
 
+All commands run from the repo root inside WSL2 (or any Linux shell).
+
 ```bash
 # Full CI: clippy + tests + web build
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh ci
+bash scripts/wsl-dev.sh ci
 
 # Start the API server (with logging)
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh server-log
+bash scripts/wsl-dev.sh server-log
 
-# In another terminal — start the web app
-wsl.exe -d Ubuntu -e bash -c "cd /root/RamseyNet/web && pnpm dev"
+# In another terminal — start the web dev server
+bash scripts/wsl-dev.sh web-dev
 
 # In a third terminal — seed test data
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh seed
+bash scripts/wsl-dev.sh seed
+```
+
+If running from Windows PowerShell, prefix with `wsl.exe -d Ubuntu -e`:
+```bash
+wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh ci
 ```
 
 The server runs on `http://localhost:3001` and the web app on `http://localhost:5173`.
@@ -89,14 +96,14 @@ Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
 ## Development
 
 ```bash
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh ci         # Full CI
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh test       # Tests only
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh clippy     # Lint
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh web        # Web build
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh sync       # Windows → WSL2
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh server     # API server
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh server-log # API server with file logging
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh seed       # Seed test data
+bash scripts/wsl-dev.sh ci          # Full CI
+bash scripts/wsl-dev.sh test        # Tests only
+bash scripts/wsl-dev.sh clippy      # Lint
+bash scripts/wsl-dev.sh web         # Web build
+bash scripts/wsl-dev.sh web-dev     # Web dev server (:5173)
+bash scripts/wsl-dev.sh server      # API server
+bash scripts/wsl-dev.sh server-log  # API server with file logging
+bash scripts/wsl-dev.sh seed        # Seed test data
 ```
 
 ## Phase Status

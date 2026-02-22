@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
-# RamseyNet WSL2 dev helper
-# Run from Windows: wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh <command>
+# RamseyNet dev helper
+#
+# Native WSL2 usage (recommended):
+#   bash scripts/wsl-dev.sh <command>
+#
+# From Windows PowerShell:
+#   wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh <command>
 #
 # Commands:
-#   test      - cargo test --all
-#   clippy    - cargo clippy --all-targets -- -D warnings
-#   build     - cargo build --all
-#   web       - pnpm install && pnpm build (in web/)
-#   ci        - run full CI suite (clippy + test + web build)
-#   sync      - copy Windows repo to WSL2 filesystem
-#   server    - start the API server on port 3001
+#   test       - cargo test --all
+#   clippy     - cargo clippy --all-targets -- -D warnings
+#   build      - cargo build --all
+#   web        - pnpm install && pnpm build (in web/)
+#   web-dev    - pnpm dev (live reload on :5173)
+#   ci         - run full CI suite (clippy + test + web build)
+#   server     - start the API server on port 3001
+#   server-log - start the API server with file logging (logs/)
+#   seed       - seed the database with test challenges + graphs
 
 set -euo pipefail
 
-# Use WSL2-native repo path
-REPO="/root/RamseyNet"
+# Resolve repo root from script location (works for any user/path)
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
 # Ensure cargo is in PATH
-source /root/.cargo/env 2>/dev/null || true
+source "$HOME/.cargo/env" 2>/dev/null || true
 
 cmd="${1:-ci}"
 shift 2>/dev/null || true
@@ -42,6 +49,12 @@ case "$cmd" in
     CI=true pnpm install
     pnpm build
     ;;
+  web-dev)
+    echo "=== Starting web dev server on :5173 ==="
+    cd web
+    pnpm install --silent
+    pnpm dev
+    ;;
   ci)
     echo "=== Full CI suite ==="
     echo "--- clippy ---"
@@ -53,18 +66,6 @@ case "$cmd" in
     CI=true pnpm install
     pnpm build
     echo "=== CI passed! ==="
-    ;;
-  sync)
-    echo "=== Syncing from Windows ==="
-    rsync -av --delete \
-      --exclude='target/' \
-      --exclude='web/node_modules/' \
-      --exclude='web/build/' \
-      --exclude='web/.svelte-kit/' \
-      --exclude='.claude/' \
-      --exclude='ramseynet.db' \
-      /mnt/c/Users/trist/RamseyNet/ /root/RamseyNet/
-    echo "=== Sync complete ==="
     ;;
   server)
     echo "=== Starting server on :3001 ==="
@@ -83,7 +84,7 @@ case "$cmd" in
     bash "$REPO/scripts/seed-ledger.sh" "$@"
     ;;
   *)
-    echo "Usage: wsl-dev.sh {test|clippy|build|web|ci|sync|server|server-log|seed}"
+    echo "Usage: wsl-dev.sh {test|clippy|build|web|web-dev|ci|server|server-log|seed}"
     exit 1
     ;;
 esac

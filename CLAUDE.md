@@ -2,19 +2,23 @@
 
 Permissionless protocol for distributed Ramsey graph search and deterministic generative graph art.
 
-## Build & Test (WSL2)
+## Build & Test
 
-All commands run in WSL2 Ubuntu 24.04. Helper script: `scripts/wsl-dev.sh`.
+Dev environment: WSL2 Ubuntu 24.04. Helper script: `scripts/wsl-dev.sh`.
 
 ```bash
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh ci         # Full CI: clippy + tests + web build
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh test       # cargo test --all
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh clippy     # cargo clippy
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh web        # pnpm install && pnpm build
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh sync       # rsync Windows → WSL2
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh server     # API server on :3001
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh server-log # API server with file logging (logs/)
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh seed       # Seed DB with test challenges + graphs
+# Native WSL2 (recommended — run from repo root)
+bash scripts/wsl-dev.sh ci          # Full CI: clippy + tests + web build
+bash scripts/wsl-dev.sh test        # cargo test --all
+bash scripts/wsl-dev.sh clippy      # cargo clippy
+bash scripts/wsl-dev.sh web         # pnpm install && pnpm build
+bash scripts/wsl-dev.sh web-dev     # pnpm dev (live reload on :5173)
+bash scripts/wsl-dev.sh server      # API server on :3001
+bash scripts/wsl-dev.sh server-log  # API server with file logging (logs/)
+bash scripts/wsl-dev.sh seed        # Seed DB with test challenges + graphs
+
+# From Windows PowerShell (alternative)
+wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh ci
 ```
 
 ## Architecture

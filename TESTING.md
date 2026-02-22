@@ -14,42 +14,45 @@ Interactive walkthrough for testing the RamseyNet web application and API. Follo
 
 ## 2. Setting Up the Test Environment
 
-### 2a. Sync, build, and verify tests pass
+All commands below run **inside the WSL2 shell** (e.g., a tmux session or Windows Terminal WSL tab) from the repo root.
+
+> **From Windows PowerShell?** Prefix any command with `wsl.exe -d Ubuntu -e`, e.g.:
+> `wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh ci`
+
+### 2a. Build and verify tests pass
 
 ```bash
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh sync
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh ci
+bash scripts/wsl-dev.sh ci
 ```
 
-You should see `=== CI passed! ===` at the end. This confirms all 36 Rust tests pass, clippy is clean, and the web app builds.
+You should see `=== CI passed! ===` at the end. This confirms all Rust tests pass, clippy is clean, and the web app builds.
 
 ### 2b. Start the API server with logging
 
-Open a **dedicated terminal** for the server. Logs will be saved to `logs/server-<timestamp>.log` inside the WSL2 repo:
+Open a **dedicated terminal** (or tmux pane) for the server. Logs will be saved to `logs/server-<timestamp>.log`:
 
 ```bash
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh server-log
+bash scripts/wsl-dev.sh server-log
 ```
 
-The server starts on **http://localhost:3001**. Keep this terminal open — all API requests will be logged here and to the log file.
+The server starts on **http://localhost:3001**. Keep this running — all API requests will be logged here and to the log file.
 
 ### 2c. Start the web dev server
 
-Open a **second terminal**:
+Open a **second terminal** (or tmux pane):
 
 ```bash
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh sync
-wsl.exe -d Ubuntu -e bash -c "source /root/.cargo/env && cd /root/RamseyNet/web && pnpm dev"
+bash scripts/wsl-dev.sh web-dev
 ```
 
 The web app starts on **http://localhost:5173**.
 
 ### 2d. Seed the database with test data
 
-Open a **third terminal** and run the seed script:
+Open a **third terminal** (or tmux pane) and run the seed script:
 
 ```bash
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh seed
+bash scripts/wsl-dev.sh seed
 ```
 
 This creates three challenges (R(3,3), R(3,4), R(4,4)) and submits four graphs:
@@ -62,17 +65,14 @@ You should see `[201]` or `[200]` status codes for each operation.
 
 ### 2e. Retrieving logs after testing
 
-Server logs are saved in WSL2 at `/root/RamseyNet/logs/`. To view:
+Server logs are saved in `logs/` under the repo root. To view:
 
 ```bash
 # List log files
-wsl.exe -d Ubuntu -e ls -la /root/RamseyNet/logs/
+ls -la logs/
 
 # View the latest log
-wsl.exe -d Ubuntu -e bash -c "cat /root/RamseyNet/logs/$(ls -t /root/RamseyNet/logs/ | head -1)"
-
-# Copy logs to Windows for review
-wsl.exe -d Ubuntu -e bash -c "cp /root/RamseyNet/logs/* /mnt/c/Users/trist/RamseyNet/logs/"
+cat logs/$(ls -t logs/ | head -1)
 ```
 
 Browser console logs can be captured via DevTools (F12 → Console tab) or by opening `chrome://net-export/` in Chrome for network-level logs.
@@ -197,7 +197,7 @@ Go back to the homepage (**RamseyNet** logo link).
 **Disconnect test:**
 1. Stop the API server (Ctrl+C in the server terminal)
 2. **Verify:** The connection dot turns red
-3. Restart the server: `wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh server-log`
+3. Restart the server: `bash scripts/wsl-dev.sh server-log`
 4. **Verify:** The dot turns green again after a few seconds (auto-reconnect)
 
 ### 3.7 Navigation
@@ -296,7 +296,7 @@ To submit any of these via the web UI, paste the RGXF JSON in this format:
 
 - No authentication or signing (Phase 5)
 - No P2P networking (Phase 6)
-- Database is local SQLite — restarting the server preserves data, but the DB file is not synced between Windows and WSL2
+- Database is local SQLite — restarting the server preserves data, but the DB file is per-environment
 - The Petersen graph encoding in the seed script has not been independently verified for R(3,4); if it fails, the server will correctly report the rejection
 - Browser console may show WebSocket close/reconnect messages when the server restarts — this is expected
 
@@ -307,7 +307,7 @@ To submit any of these via the web UI, paste the RGXF JSON in this format:
 To start fresh with a clean database:
 
 ```bash
-wsl.exe -d Ubuntu -e rm -f /root/RamseyNet/ramseynet.db
+rm -f ramseynet.db ramseynet.db-wal ramseynet.db-shm
 ```
 
 Then restart the server and re-run the seed script.
