@@ -24,3 +24,6 @@ anyhow = { workspace = true }
 reqwest = { version = "0.12", features = ["json"] }
 ramseynet-graph = { path = "../ramseynet-graph" }
 ramseynet-verifier = { path = "../ramseynet-verifier" }
+ramseynet-ledger = { path = "../ramseynet-ledger" }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
