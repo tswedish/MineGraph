@@ -16,11 +16,13 @@ web/build/
 *.db
 *.db-journal
 *.db-wal
+*.db-shm
 
 # OS
 .DS_Store
 Thumbs.db
 Desktop.ini
+*:Zone.Identifier
 
 # IDE
 .idea/
@@ -28,5 +30,18 @@ Desktop.ini
 *.swp
 *.swo
 
-# Claude
+# Claude / Playwright
 .claude/
+.playwright/
+.playwright-cli/
+
+# Logs
+logs/
+
+# Screenshots (dev artifacts)
+*.png
+
+# Root-level dev artifacts
+/package.json
+/package-lock.json
+/challenges-snap.yaml
