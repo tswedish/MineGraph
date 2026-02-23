@@ -79,12 +79,16 @@ case "$cmd" in
     echo "=== Starting server on :3001 (logging to $LOGFILE) ==="
     RUST_LOG=info cargo run -p ramseynet-server "$@" 2>&1 | tee "$LOGFILE"
     ;;
+  search)
+    echo "=== Starting search worker ==="
+    cargo run -p ramseynet-search -- "$@"
+    ;;
   seed)
     echo "=== Seeding ledger ==="
     bash "$REPO/scripts/seed-ledger.sh" "$@"
     ;;
   *)
-    echo "Usage: wsl-dev.sh {test|clippy|build|web|web-dev|ci|server|server-log|seed}"
+    echo "Usage: wsl-dev.sh {test|clippy|build|web|web-dev|ci|server|server-log|search|seed}"
     exit 1
     ;;
 esac

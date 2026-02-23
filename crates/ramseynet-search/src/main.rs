@@ -1,0 +1,108 @@
+use anyhow::Result;
+use clap::Parser;
+use tokio::sync::watch;
+use tracing::info;
+
+use ramseynet_search::annealing::AnnealingSearcher;
+use ramseynet_search::client::ServerClient;
+use ramseynet_search::greedy::GreedySearcher;
+use ramseynet_search::local_search::LocalSearcher;
+use ramseynet_search::search::Searcher;
+use ramseynet_search::worker::{run_worker, WorkerConfig};
+
+#[derive(Parser)]
+#[command(name = "ramseynet-search", about = "RamseyNet search worker")]
+struct Cli {
+    /// Server URL (e.g. http://localhost:3001)
+    #[arg(long, default_value = "http://localhost:3001")]
+    server: String,
+
+    /// Challenge ID (e.g. ramsey:3:3:v1)
+    #[arg(long)]
+    challenge: String,
+
+    /// Search strategy: greedy, local, annealing, or all
+    #[arg(long, default_value = "all")]
+    strategy: String,
+
+    /// Starting vertex count (overrides server record)
+    #[arg(long)]
+    start_n: Option<u32>,
+
+    /// Maximum iterations per search attempt
+    #[arg(long, default_value = "100000")]
+    max_iters: u64,
+
+    /// Tabu tenure for local search
+    #[arg(long, default_value = "10")]
+    tabu_tenure: u32,
+
+    /// Initial temperature for simulated annealing
+    #[arg(long, default_value = "2.0")]
+    initial_temp: f64,
+
+    /// Cooling rate for simulated annealing
+    #[arg(long, default_value = "0.9995")]
+    cooling_rate: f64,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+    let cli = Cli::parse();
+
+    info!(
+        server = %cli.server,
+        challenge = %cli.challenge,
+        strategy = %cli.strategy,
+        "starting ramseynet search worker"
+    );
+
+    let client = ServerClient::new(&cli.server);
+
+    let searchers: Vec<Box<dyn Searcher>> = match cli.strategy.as_str() {
+        "greedy" => vec![Box::new(GreedySearcher)],
+        "local" => vec![Box::new(LocalSearcher {
+            tabu_tenure: cli.tabu_tenure,
+        })],
+        "annealing" => vec![Box::new(AnnealingSearcher {
+            initial_temp: cli.initial_temp,
+            cooling_rate: cli.cooling_rate,
+        })],
+        "all" => vec![
+            Box::new(GreedySearcher),
+            Box::new(LocalSearcher {
+                tabu_tenure: cli.tabu_tenure,
+            }),
+            Box::new(AnnealingSearcher {
+                initial_temp: cli.initial_temp,
+                cooling_rate: cli.cooling_rate,
+            }),
+        ],
+        other => anyhow::bail!("unknown strategy: {other} (use greedy, local, annealing, or all)"),
+    };
+
+    let config = WorkerConfig {
+        challenge_id: cli.challenge,
+        start_n: cli.start_n,
+        max_iters: cli.max_iters,
+    };
+
+    // Graceful shutdown on Ctrl+C
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        info!("Ctrl+C received, shutting down...");
+        let _ = shutdown_tx.send(true);
+    });
+
+    run_worker(client, searchers, config, shutdown_rx).await?;
+
+    Ok(())
+}

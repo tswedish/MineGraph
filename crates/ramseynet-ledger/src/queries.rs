@@ -243,6 +243,7 @@ impl Ledger {
     }
 
     /// Get full submission detail by CID: submission + optional receipt + optional challenge.
+    #[allow(clippy::type_complexity)]
     pub fn get_submission_detail(
         &self,
         cid: &str,

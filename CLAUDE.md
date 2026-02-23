@@ -10,10 +10,21 @@ Permissionless protocol for distributed Ramsey graph search and deterministic ge
 ./run server      # API server on :3001
 ./run server-log  # API server with file logging
 ./run web-dev     # SvelteKit dev server on :5173
+./run search      # Search worker (requires --challenge; see below)
 ./run seed        # Seed DB with test data
 ```
 
 Other commands: `clippy`, `build`, `web` (production build).
+
+### Search Worker
+
+```
+./run search --challenge ramsey:3:3:v1          # all strategies, default server
+./run search --challenge ramsey:3:3:v1 --strategy greedy --start-n 4
+./run search --challenge ramsey:3:4:v1 --server http://remote:3001 --max-iters 50000
+```
+
+Options: `--strategy {greedy|local|annealing|all}`, `--start-n N`, `--max-iters N`, `--tabu-tenure N`, `--initial-temp F`, `--cooling-rate F`.
 
 ## Architecture
 
@@ -28,7 +39,7 @@ Rust workspace (`crates/`) + SvelteKit 2 (`web/`).
 | `ramseynet-verifier` | Clique/independent-set detection, OVWC-1 WASM binary |
 | `ramseynet-ledger` | SQLite ledger: challenges, submissions, receipts, records, events |
 | `ramseynet-server` | Axum REST + WebSocket, full submit lifecycle |
-| `ramseynet-search` | Greedy, local search, simulated annealing, worker loop |
+| `ramseynet-search` | Standalone CLI: greedy, local search, simulated annealing, worker loop |
 
 ## Web App (SvelteKit 2 / Svelte 5)
 
@@ -82,4 +93,4 @@ Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
 
 ## Phase Status
 
-Phases 0–4 complete. Phase 5 (search workers + duels) is next.
+Phases 0–5 complete. Phase 6 (ed25519 identity, duels, libp2p) is next.
