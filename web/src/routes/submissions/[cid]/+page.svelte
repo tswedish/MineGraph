@@ -69,6 +69,9 @@
 				<span class="verdict-badge" class:accepted={detail.verdict === 'accepted'} class:rejected={detail.verdict === 'rejected'}>
 					{detail.verdict ?? 'pending'}
 				</span>
+				{#if detail.is_record}
+					<span class="record-badge">Current Record</span>
+				{/if}
 			</div>
 			{#if detail.reason}
 				<div class="meta-row">
@@ -200,6 +203,18 @@
 	.verdict-badge.accepted {
 		color: var(--color-accepted);
 		background: color-mix(in srgb, var(--color-accepted) 15%, transparent);
+	}
+
+	.record-badge {
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		padding: 0.2rem 0.6rem;
+		border-radius: 0.25rem;
+		letter-spacing: 0.05em;
+		color: #f59e0b;
+		background: color-mix(in srgb, #f59e0b 15%, transparent);
 	}
 
 	.verdict-badge.rejected {

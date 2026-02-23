@@ -376,6 +376,17 @@ async fn get_submission(
 
     let rgxf: Option<Value> = serde_json::from_str(&submission.rgxf_json).ok();
 
+    // Check if this submission is the current record
+    let ledger2 = state.ledger.clone();
+    let challenge_id = submission.challenge_id.clone();
+    let record = tokio::task::spawn_blocking(move || ledger2.get_record(&challenge_id))
+        .await
+        .unwrap()
+        .map_err(map_ledger_error)?;
+    let is_record = record
+        .as_ref()
+        .is_some_and(|r| r.best_cid == submission.graph_cid);
+
     Ok(Json(json!({
         "graph_cid": submission.graph_cid,
         "challenge_id": submission.challenge_id,
@@ -387,6 +398,7 @@ async fn get_submission(
         "witness": receipt.as_ref().and_then(|r| r.witness.as_ref()),
         "verified_at": receipt.as_ref().map(|r| &r.verified_at),
         "challenge": challenge,
+        "is_record": is_record,
     })))
 }
 

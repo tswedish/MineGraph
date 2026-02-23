@@ -68,6 +68,7 @@ export interface SubmissionDetail {
 	witness: number[] | null;
 	verified_at: string | null;
 	challenge: Challenge | null;
+	is_record: boolean;
 }
 
 export interface EventMessage {

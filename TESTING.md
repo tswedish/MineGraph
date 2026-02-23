@@ -107,6 +107,7 @@ Click the CID link on any challenge record, event feed entry, or records table r
 - [ ] Challenge link → navigates to `/challenges/[id]` with R(k,l) label
 - [ ] Graph size (n) displayed
 - [ ] Verdict badge: green ACCEPTED or red REJECTED
+- [ ] Amber "Current Record" badge shown next to verdict (when submission is the current record)
 - [ ] Reason text (if rejected)
 - [ ] Witness vertices (if present)
 - [ ] Matrix View + Circle Layout side-by-side (with witness overlay for rejected graphs)

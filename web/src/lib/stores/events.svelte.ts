@@ -7,7 +7,7 @@ let events = $state<EventMessage[]>([]);
 let connected = $state(false);
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let reconnectDelay = 1000;
+let reconnectDelay = 500;
 
 function handleMessage(ev: MessageEvent) {
 	try {
@@ -26,7 +26,7 @@ function handleMessage(ev: MessageEvent) {
 
 function handleOpen() {
 	connected = true;
-	reconnectDelay = 1000;
+	reconnectDelay = 500;
 }
 
 function handleClose() {
@@ -41,7 +41,7 @@ function scheduleReconnect() {
 		reconnectTimer = null;
 		connect();
 	}, reconnectDelay);
-	reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+	reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
 }
 
 export function connect() {
