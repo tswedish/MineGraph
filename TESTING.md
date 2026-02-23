@@ -226,9 +226,69 @@ Then restart the server and re-seed.
 
 ---
 
-## 7. Known Limitations
+## 7. Search Worker Testing
 
-- No authentication or signing (Phase 5)
+### 7a. Prerequisites
+
+Start the API server and seed data (sections 2b + 2d above).
+
+### 7b. Basic run
+
+```bash
+./run search --challenge ramsey:3:3:v1 --strategy greedy --max-iters 1000
+```
+
+Expected: worker connects, finds valid graphs at n=2..5, submits each, then fails to find n=6 (since R(3,3)=6) and backs off. Press Ctrl+C to stop.
+
+### 7c. Strategy-specific runs
+
+```bash
+# Local search with tabu
+./run search --challenge ramsey:3:3:v1 --strategy local --max-iters 10000
+
+# Simulated annealing
+./run search --challenge ramsey:3:3:v1 --strategy annealing --max-iters 50000
+
+# All strategies (default)
+./run search --challenge ramsey:3:3:v1
+```
+
+### 7d. Starting from a specific n
+
+```bash
+./run search --challenge ramsey:3:4:v1 --start-n 5 --strategy greedy
+```
+
+### 7e. Verify submissions appear in the UI
+
+After running the search worker:
+- [ ] `/challenges/ramsey:3:3:v1` shows updated record
+- [ ] `/records` table reflects new best_n values
+- [ ] Event feed on homepage shows `graph.submitted` events from the worker
+- [ ] Submission detail pages load correctly for worker-submitted graphs
+
+### 7f. Graceful shutdown
+
+1. Start: `./run search --challenge ramsey:3:3:v1`
+2. Press Ctrl+C
+3. Verify: Worker logs `Ctrl+C received, shutting down...` and exits cleanly
+
+### 7g. Error handling
+
+```bash
+# Server not running — should fail with connection error
+./run search --challenge ramsey:3:3:v1 --server http://localhost:9999
+
+# Nonexistent challenge — should fail with "challenge not found"
+./run search --challenge ramsey:99:99:v1
+```
+
+---
+
+## 8. Known Limitations
+
+- No authentication or signing (Phase 6)
 - No P2P networking (Phase 6)
 - Database is local SQLite — persists across restarts but is per-environment
 - WebSocket close/reconnect messages in browser console on server restart are expected
+- Search worker has no identity — all submissions are anonymous until Phase 6
