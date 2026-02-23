@@ -70,7 +70,7 @@
 					</div>
 					<div class="record-stat">
 						<span class="stat-label">Graph CID</span>
-						<span class="stat-cid">{record.best_cid}</span>
+						<a href="/submissions/{record.best_cid}" class="stat-cid">{record.best_cid}</a>
 					</div>
 					<div class="record-stat">
 						<span class="stat-label">Updated</span>
@@ -204,6 +204,11 @@
 		color: var(--color-text);
 		word-break: break-all;
 		max-width: 400px;
+		text-decoration: none;
+	}
+
+	.stat-cid:hover {
+		color: var(--color-accent);
 	}
 
 	.viz-row {

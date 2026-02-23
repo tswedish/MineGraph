@@ -1,273 +1,196 @@
-# RamseyNet — Human Testing Guide
+# RamseyNet — Testing Guide
 
-Interactive walkthrough for testing the RamseyNet web application and API. Follow these steps to set up a local test environment, explore every feature, and capture logs for review.
+Interactive walkthrough for testing the web application and API.
 
 ---
 
 ## 1. Prerequisites
 
-- **WSL2 Ubuntu 24.04** with Rust stable + pnpm/Node.js (see CLAUDE.md)
-- **curl** and optionally **jq** (for pretty JSON output)
-- A modern web browser (Chrome/Firefox/Edge)
+- Rust stable + pnpm/Node.js (see README)
+- **curl** and optionally **jq**
+- A modern web browser
 
 ---
 
-## 2. Setting Up the Test Environment
-
-All commands below run **inside the WSL2 shell** (e.g., a tmux session or Windows Terminal WSL tab) from the repo root.
-
-> **From Windows PowerShell?** Prefix any command with `wsl.exe -d Ubuntu -e`, e.g.:
-> `wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh ci`
+## 2. Setup
 
 ### 2a. Build and verify tests pass
 
-```bash
-bash scripts/wsl-dev.sh ci
+```
+./run ci
 ```
 
-You should see `=== CI passed! ===` at the end. This confirms all Rust tests pass, clippy is clean, and the web app builds.
+You should see `=== CI passed! ===` at the end.
 
-### 2b. Start the API server with logging
+### 2b. Start the API server
 
-Open a **dedicated terminal** (or tmux pane) for the server. Logs will be saved to `logs/server-<timestamp>.log`:
+Open a terminal for the server (logs saved to `logs/`):
 
-```bash
-bash scripts/wsl-dev.sh server-log
+```
+./run server-log
 ```
 
-The server starts on **http://localhost:3001**. Keep this running — all API requests will be logged here and to the log file.
+Server starts on **http://localhost:3001**.
 
 ### 2c. Start the web dev server
 
-Open a **second terminal** (or tmux pane):
+In a second terminal:
 
-```bash
-bash scripts/wsl-dev.sh web-dev
+```
+./run web-dev
 ```
 
-The web app starts on **http://localhost:5173**.
+Web app starts on **http://localhost:5173**.
 
-### 2d. Seed the database with test data
+### 2d. Seed test data
 
-Open a **third terminal** (or tmux pane) and run the seed script:
+In a third terminal:
 
-```bash
-bash scripts/wsl-dev.sh seed
+```
+./run seed
 ```
 
 This creates three challenges (R(3,3), R(3,4), R(4,4)) and submits four graphs:
-- **C5** → R(3,3) — accepted, sets record at n=5
-- **Wagner graph** → R(3,4) — accepted, sets record at n=8
+- **C5** → R(3,3) — accepted, record n=5
+- **Wagner graph** → R(3,4) — accepted, record n=8
 - **K5** → R(3,3) — rejected (clique_found, witness [0,1,2])
 - **E5 (empty)** → R(3,3) — rejected (independent_set_found, witness [0,1,2])
 
-You should see `[201]` or `[200]` status codes for each operation.
+### 2e. Server logs
 
-### 2e. Retrieving logs after testing
-
-Server logs are saved in `logs/` under the repo root. To view:
-
-```bash
-# List log files
-ls -la logs/
-
-# View the latest log
-cat logs/$(ls -t logs/ | head -1)
 ```
-
-Browser console logs can be captured via DevTools (F12 → Console tab) or by opening `chrome://net-export/` in Chrome for network-level logs.
+ls -la logs/
+```
 
 ---
 
 ## 3. Feature Walkthrough
 
-Open **http://localhost:5173** in your browser and follow these steps.
+Open **http://localhost:5173** in your browser.
 
 ### 3.1 Homepage
 
-**What to verify:**
-- [ ] The RamseyNet title renders with a purple gradient
-- [ ] The green status badge shows `RamseyNet v0.1.0 — ok`
-- [ ] Three cards appear: Challenges, Submit, Records
-- [ ] The **Live Events** panel at the bottom shows a green connection dot
-- [ ] Events from the seed script appear (challenge.created, graph.submitted, graph.verified, record.updated)
-- [ ] Events are color-coded: blue for created, green for verified, amber for record.updated
+- [ ] RamseyNet title renders with purple gradient
+- [ ] Green status badge shows `RamseyNet v0.1.0 — ok`
+- [ ] Three navigation cards: Challenges, Submit, Records
+- [ ] Live Events panel shows a green connection dot
+- [ ] Events from the seed script appear (challenge.created, graph.submitted, etc.)
+- [ ] Events with CIDs are clickable links to submission detail pages
+- [ ] No favicon 404 in the network tab (SVG K5 favicon loads)
 
 ### 3.2 Challenges List (`/challenges`)
 
 Click **"View challenges"** or the **Challenges** nav link.
 
-**What to verify:**
-- [ ] Three challenge cards appear: R(3,3), R(3,4), R(4,4)
-- [ ] R(3,3) shows `n = 5` in green (the C5 record)
-- [ ] R(3,4) shows `n = 8` in green (the Wagner graph record)
-- [ ] R(4,4) shows `no submissions` (no record yet)
-- [ ] Each card shows its challenge_id and description
-- [ ] Cards show truncated CIDs for challenges with records
-- [ ] Hovering a card highlights its border in purple
+- [ ] Three challenge cards: R(3,3), R(3,4), R(4,4)
+- [ ] R(3,3) shows `n = 5` in green
+- [ ] R(3,4) shows `n = 8` in green
+- [ ] R(4,4) shows `no submissions`
 
 ### 3.3 Challenge Detail (`/challenges/ramsey:3:3:v1`)
 
 Click the **R(3,3)** card.
 
-**What to verify:**
-- [ ] Back link ("← Challenges") navigates back to the list
-- [ ] Header shows `R(3,3)` with challenge_id `ramsey:3:3:v1`
-- [ ] Description text appears
-- [ ] **Current Record** section shows: Best n = 5, full CID, timestamp
-- [ ] **Matrix View** (left): 5×5 adjacency matrix with the C5 pattern — a checkerboard-like cycle with diagonal empty cells
-- [ ] **Circle Layout** (right): Pentagon with 5 vertices connected in a cycle
-- [ ] Vertex labels (0–4) appear on both visualizations
-- [ ] Scrolling down reveals the **Submit a Graph** form
-- [ ] The challenge dropdown is pre-selected to `ramsey:3:3:v1`
+- [ ] Back link navigates to challenge list
+- [ ] Header: `R(3,3)` with `ramsey:3:3:v1`
+- [ ] Current Record: Best n = 5, full CID (clickable → submission detail), timestamp
+- [ ] Matrix View: 5x5 adjacency matrix with C5 pattern
+- [ ] Circle Layout: Pentagon with cycle edges
+- [ ] Submit form pre-selected to `ramsey:3:3:v1`
 
-### 3.4 Challenge Detail — R(3,4) with Wagner Graph
+### 3.4 Submission Detail (`/submissions/[cid]`)
 
-Navigate to `/challenges/ramsey:3:4:v1` (use the back link → click R(3,4) card).
+Click the CID link on any challenge record, event feed entry, or records table row.
 
-**What to verify:**
-- [ ] Best n = 8 with the Wagner graph CID
-- [ ] Matrix View shows an 8×8 grid (the Wagner graph adjacency)
-- [ ] Circle Layout shows 8 vertices in a circle with the 3-regular edge pattern
-- [ ] The Wagner graph has a symmetric pattern (circulant structure) in both views
+- [ ] Back button navigates to previous page
+- [ ] Full CID displayed in monospace header
+- [ ] Challenge link → navigates to `/challenges/[id]` with R(k,l) label
+- [ ] Graph size (n) displayed
+- [ ] Verdict badge: green ACCEPTED or red REJECTED
+- [ ] Reason text (if rejected)
+- [ ] Witness vertices (if present)
+- [ ] Matrix View + Circle Layout side-by-side (with witness overlay for rejected graphs)
+- [ ] Submitted and Verified timestamps
 
-### 3.5 Submit Page (`/submit`)
+### 3.5 Records (`/records`)
+
+Click the **Records** nav link.
+
+- [ ] Table with Challenge, Best n, CID, Updated columns
+- [ ] CID column entries are clickable links to submission detail
+- [ ] Challenge column links to challenge detail
+
+### 3.6 Submit Page (`/submit`)
 
 Click the **Submit** nav link.
 
-**What to verify:**
-- [ ] Page title "Submit a Graph" with subtitle
 - [ ] Challenge dropdown lists all three challenges
-- [ ] RGXF JSON textarea with placeholder text
-- [ ] Submit button is disabled when no challenge or graph is entered
+- [ ] RGXF JSON textarea with placeholder
 
-#### Test A: Submit an accepted graph
+#### Test A: Accepted graph
 
-1. Select **ramsey:4:4:v1** from the dropdown
-2. Paste this C5 graph into the textarea:
-   ```json
-   {"n": 5, "encoding": "utri_b64_v1", "bits_b64": "mUA="}
-   ```
-3. **Verify:** A live matrix preview appears below the textarea showing the C5 adjacency pattern
-4. **Verify:** The preview label shows "Preview (n=5)"
-5. Click **Submit Graph**
-6. **Verify:** A green-bordered result box appears with:
-   - `ACCEPTED` in green
-   - `New record!` in amber
-   - The graph CID
-7. **Verify:** The Submit button briefly shows "Submitting..." while processing
-
-#### Test B: Submit a rejected graph
-
-1. Keep **ramsey:4:4:v1** selected (or switch to ramsey:3:3:v1)
-2. Clear the textarea and paste this K4 (complete on 4 vertices):
-   ```json
-   {"n": 4, "encoding": "utri_b64_v1", "bits_b64": "/A=="}
-   ```
-3. **Verify:** Preview shows a 4×4 fully-connected matrix
+1. Select **ramsey:4:4:v1**
+2. Paste: `{"n": 5, "encoding": "utri_b64_v1", "bits_b64": "mUA="}`
+3. Verify: Live matrix preview appears
 4. Click **Submit Graph**
-5. **Verify:** A red-bordered result box appears with:
-   - `REJECTED` in red
-   - Reason: `clique_found`
-   - Witness vertices: `[0, 1, 2, 3]` in red
-   - A witness overlay matrix where the witness rows/columns are highlighted in red
+5. Verify: Green result with `ACCEPTED` and `New record!`
 
-#### Test C: Invalid JSON handling
+#### Test B: Rejected graph
 
-1. Type `not valid json` in the textarea
-2. **Verify:** An "Invalid JSON" error appears below the textarea in red
-3. **Verify:** No preview is shown
-4. **Verify:** The Submit button is disabled
+1. Paste: `{"n": 4, "encoding": "utri_b64_v1", "bits_b64": "/A=="}`
+2. Click **Submit Graph**
+3. Verify: Red result with `REJECTED`, reason `clique_found`, witness `[0, 1, 2, 3]`
 
-#### Test D: Missing fields
+#### Test C: Invalid input
 
-1. Type `{"n": 5}` in the textarea
-2. **Verify:** A "Missing required fields" error appears
-
-### 3.6 Live Events (WebSocket)
-
-Go back to the homepage (**RamseyNet** logo link).
-
-**What to verify:**
-- [ ] The Live Events panel shows all events from your submissions in Test A/B above
-- [ ] New events appear at the top (newest first)
-- [ ] Sequence numbers (#1, #2, ...) are monotonically increasing
-- [ ] The green dot indicates an active WebSocket connection
-
-**Disconnect test:**
-1. Stop the API server (Ctrl+C in the server terminal)
-2. **Verify:** The connection dot turns red
-3. Restart the server: `bash scripts/wsl-dev.sh server-log`
-4. **Verify:** The dot turns green again after a few seconds (auto-reconnect)
+1. Type `not valid json` → "Invalid JSON" error, submit disabled
+2. Type `{"n": 5}` → "Missing required fields" error
 
 ### 3.7 Navigation
 
-**What to verify:**
-- [ ] The **RamseyNet** logo always navigates to the homepage
-- [ ] **Challenges** nav link goes to `/challenges`
-- [ ] **Submit** nav link goes to `/submit`
-- [ ] Browser back/forward buttons work correctly (SPA routing)
-- [ ] Directly visiting a URL like `/challenges/ramsey:3:3:v1` loads the page (no 404)
+- [ ] RamseyNet logo → homepage
+- [ ] Challenges / Submit / Records nav links work
+- [ ] Browser back/forward works (SPA routing)
+- [ ] Direct URL access works (e.g., `/challenges/ramsey:3:3:v1`)
+
+### 3.8 WebSocket Reconnect
+
+1. Stop the API server (Ctrl+C)
+2. Verify: Connection dot turns red
+3. Restart: `./run server-log`
+4. Verify: Dot turns green within a few seconds
 
 ---
 
 ## 4. API Testing with curl
 
-You can also test the API directly. These commands assume the server is running on port 3001.
-
-### Health check
-
 ```bash
-curl -s http://localhost:3001/api/health | jq .
-```
+# Health check
+curl -s localhost:3001/api/health | jq .
 
-### List challenges
+# List challenges
+curl -s localhost:3001/api/challenges | jq .
 
-```bash
-curl -s http://localhost:3001/api/challenges | jq .
-```
+# Challenge detail
+curl -s localhost:3001/api/challenges/ramsey:3:3:v1 | jq .
 
-### Get challenge detail (includes record_graph for visualization)
+# Records
+curl -s localhost:3001/api/records | jq .
 
-```bash
-curl -s http://localhost:3001/api/challenges/ramsey:3:3:v1 | jq .
-```
+# Submission detail (replace CID with a real one from records)
+curl -s localhost:3001/api/submissions/<cid> | jq .
 
-### List records
-
-```bash
-curl -s http://localhost:3001/api/records | jq .
-```
-
-### Stateless verification (no database)
-
-```bash
-curl -s -X POST http://localhost:3001/api/verify \
+# Stateless verification
+curl -s -X POST localhost:3001/api/verify \
   -H "Content-Type: application/json" \
-  -d '{
-    "oras_version": "ovwc-1",
-    "k": 3, "ell": 3,
-    "graph": {"n": 5, "encoding": "utri_b64_v1", "bits_b64": "mUA="},
-    "want_cid": true
-  }' | jq .
-```
+  -d '{"oras_version":"ovwc-1","k":3,"ell":3,"graph":{"n":5,"encoding":"utri_b64_v1","bits_b64":"mUA="},"want_cid":true}' | jq .
 
-### Submit a graph (full lifecycle)
-
-```bash
-curl -s -X POST http://localhost:3001/api/submit \
+# Submit a graph
+curl -s -X POST localhost:3001/api/submit \
   -H "Content-Type: application/json" \
-  -d '{
-    "challenge_id": "ramsey:4:4:v1",
-    "graph": {"n": 5, "encoding": "utri_b64_v1", "bits_b64": "mUA="}
-  }' | jq .
-```
+  -d '{"challenge_id":"ramsey:4:4:v1","graph":{"n":5,"encoding":"utri_b64_v1","bits_b64":"mUA="}}' | jq .
 
-### WebSocket event stream
-
-```bash
-# Requires websocat or wscat
-# Install: npm install -g wscat
+# WebSocket event stream (requires wscat: npm install -g wscat)
 wscat -c ws://localhost:3001/api/events
 ```
 
@@ -275,40 +198,36 @@ wscat -c ws://localhost:3001/api/events
 
 ## 5. Test Graphs Reference
 
-These graphs are available in `test-vectors/small_graphs.json`:
+From `test-vectors/small_graphs.json`:
 
-| Graph | n | RGXF bits_b64 | R(3,3) | R(3,4) | Notes |
-|-------|---|---------------|--------|--------|-------|
-| C5 (5-cycle) | 5 | `mUA=` | accepted | accepted | omega=2, alpha=2 |
-| K5 (complete) | 5 | `/8A=` | rejected | rejected | omega=5, witness [0,1,2] |
-| E5 (empty) | 5 | `AAA=` | rejected | rejected | alpha=5, witness [0,1,2] |
-| Petersen | 10 | `mEREiCzQ` | — | rejected | omega=2, alpha=4 (alpha not < 4) |
-| Wagner | 8 | `kySmUA==` | — | accepted | omega=2, alpha=3, 3-regular |
-| K4 (complete) | 4 | `/A==` | rejected | — | omega=4, witness [0,1,2] |
+| Graph | n | bits_b64 | R(3,3) | R(3,4) |
+|-------|---|----------|--------|--------|
+| C5 (5-cycle) | 5 | `mUA=` | accepted | accepted |
+| K5 (complete) | 5 | `/8A=` | rejected | rejected |
+| E5 (empty) | 5 | `AAA=` | rejected | rejected |
+| Petersen | 10 | `mEREiCzQ` | — | rejected |
+| Wagner | 8 | `kySmUA==` | — | accepted |
+| K4 (complete) | 4 | `/A==` | rejected | — |
 
-To submit any of these via the web UI, paste the RGXF JSON in this format:
-```json
-{"n": 5, "encoding": "utri_b64_v1", "bits_b64": "mUA="}
+RGXF JSON format: `{"n": 5, "encoding": "utri_b64_v1", "bits_b64": "mUA="}`
+
+---
+
+## 6. Cleanup
+
+To start fresh:
+
 ```
-
----
-
-## 6. Known Limitations (Phase 4)
-
-- No authentication or signing (Phase 5)
-- No P2P networking (Phase 6)
-- Database is local SQLite — restarting the server preserves data, but the DB file is per-environment
-- The Petersen graph encoding in the seed script has not been independently verified for R(3,4); if it fails, the server will correctly report the rejection
-- Browser console may show WebSocket close/reconnect messages when the server restarts — this is expected
-
----
-
-## 7. Cleanup
-
-To start fresh with a clean database:
-
-```bash
 rm -f ramseynet.db ramseynet.db-wal ramseynet.db-shm
 ```
 
-Then restart the server and re-run the seed script.
+Then restart the server and re-seed.
+
+---
+
+## 7. Known Limitations
+
+- No authentication or signing (Phase 5)
+- No P2P networking (Phase 6)
+- Database is local SQLite — persists across restarts but is per-environment
+- WebSocket close/reconnect messages in browser console on server restart are expected

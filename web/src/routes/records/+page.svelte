@@ -57,7 +57,7 @@
 								</a>
 							</td>
 							<td class="best-n">{r.best_n}</td>
-							<td class="cid" title={r.best_cid}>{r.best_cid.slice(0, 16)}...</td>
+							<td class="cid" title={r.best_cid}><a href="/submissions/{r.best_cid}" class="cid-link">{r.best_cid.slice(0, 16)}...</a></td>
 							<td class="timestamp">{new Date(r.updated_at).toLocaleDateString()}</td>
 						</tr>
 					{/each}
@@ -134,6 +134,15 @@
 		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		color: var(--color-text-muted);
+	}
+
+	.cid-link {
+		color: inherit;
+		text-decoration: none;
+	}
+
+	.cid-link:hover {
+		color: var(--color-accent);
 	}
 
 	.timestamp {

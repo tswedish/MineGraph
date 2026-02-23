@@ -2,30 +2,24 @@
 
 Permissionless protocol for distributed Ramsey graph search and deterministic generative graph art.
 
-## Build & Test
+## Quick Start
 
-Dev environment: WSL2 Ubuntu 24.04. Helper script: `scripts/wsl-dev.sh`.
-
-```bash
-# Native WSL2 (recommended — run from repo root)
-bash scripts/wsl-dev.sh ci          # Full CI: clippy + tests + web build
-bash scripts/wsl-dev.sh test        # cargo test --all
-bash scripts/wsl-dev.sh clippy      # cargo clippy
-bash scripts/wsl-dev.sh web         # pnpm install && pnpm build
-bash scripts/wsl-dev.sh web-dev     # pnpm dev (live reload on :5173)
-bash scripts/wsl-dev.sh server      # API server on :3001
-bash scripts/wsl-dev.sh server-log  # API server with file logging (logs/)
-bash scripts/wsl-dev.sh seed        # Seed DB with test challenges + graphs
-
-# From Windows PowerShell (alternative)
-wsl.exe -d Ubuntu -e bash scripts/wsl-dev.sh ci
 ```
+./run ci          # Full CI: clippy + tests + web build
+./run test        # Rust tests only
+./run server      # API server on :3001
+./run server-log  # API server with file logging
+./run web-dev     # SvelteKit dev server on :5173
+./run seed        # Seed DB with test data
+```
+
+Other commands: `clippy`, `build`, `web` (production build).
 
 ## Architecture
 
 Rust workspace (`crates/`) + SvelteKit 2 (`web/`).
 
-**Crate order:** `types` → `graph` → `verifier` → `ledger` → `server` ← `search`
+**Crate dependency order:** `types` → `graph` → `verifier` → `ledger` → `server` ← `search`
 
 | Crate | Purpose |
 |-------|---------|
@@ -38,16 +32,27 @@ Rust workspace (`crates/`) + SvelteKit 2 (`web/`).
 
 ## Web App (SvelteKit 2 / Svelte 5)
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| `MatrixView` | `web/src/lib/components/MatrixView.svelte` | Canvas adjacency matrix with witness overlay |
-| `CircleLayout` | `web/src/lib/components/CircleLayout.svelte` | SVG circle graph (ORS-1.0) |
-| `EventFeed` | `web/src/lib/components/EventFeed.svelte` | Live OESP-1 event ticker |
-| `SubmitForm` | `web/src/lib/components/SubmitForm.svelte` | RGXF paste + preview + submit |
-| `rgxf.ts` | `web/src/lib/rgxf.ts` | Client-side RGXF decoder (base64 → adjacency) |
-| `events.svelte.ts` | `web/src/lib/stores/events.svelte.ts` | WebSocket store with auto-reconnect |
+**Components** in `web/src/lib/components/`:
 
-**Routes:** `/` (homepage), `/challenges` (list), `/challenges/[id]` (detail + viz + submit), `/records` (best-known), `/submit` (standalone)
+| Component | Purpose |
+|-----------|---------|
+| `MatrixView` | Canvas adjacency matrix with witness overlay |
+| `CircleLayout` | SVG circle graph (ORS-1.0) |
+| `EventFeed` | Live OESP-1 event ticker with CID links |
+| `SubmitForm` | RGXF paste + preview + submit |
+
+**Stores/utils:** `events.svelte.ts` (WebSocket + auto-reconnect), `rgxf.ts` (client-side RGXF decoder), `api.ts` (typed fetch wrappers).
+
+**Routes:**
+
+| Route | Purpose |
+|-------|---------|
+| `/` | Homepage with health badge, nav cards, live event feed |
+| `/challenges` | Challenge list with best-known records |
+| `/challenges/[id]` | Challenge detail + graph viz + inline submit |
+| `/records` | Best-known records table |
+| `/submissions/[cid]` | Submission detail: verdict, witness, graph viz |
+| `/submit` | Standalone graph submission form |
 
 ## Server API
 
@@ -59,6 +64,7 @@ Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
 | `/api/challenges` | GET/POST | List or create challenges |
 | `/api/challenges/{id}` | GET | Challenge detail + current record + record_graph RGXF |
 | `/api/records` | GET | Best-known records |
+| `/api/submissions/{cid}` | GET | Submission detail: graph, receipt, challenge context |
 | `/api/verify` | POST | Stateless graph verification |
 | `/api/submit` | POST | Full lifecycle: verify + store + record update |
 | `/api/events` | WS | OESP-1 event stream |
@@ -71,8 +77,8 @@ Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
 
 ## Test Data
 
-`test-vectors/small_graphs.json` contains C5, K5, E5, and Petersen graph with RGXF encodings.
-`scripts/seed-ledger.sh` creates challenges and submits test graphs via the API.
+- `test-vectors/small_graphs.json` — C5, K5, E5, Petersen, Wagner with RGXF encodings
+- `scripts/seed-ledger.sh` — creates challenges and submits test graphs via the API
 
 ## Phase Status
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { connect, disconnect, getEvents, isConnected } from '$lib/stores/events.svelte';
+	import type { EventMessage } from '$lib/api';
 
 	let { maxEvents = 20 }: { maxEvents?: number } = $props();
 
@@ -13,24 +14,78 @@
 	const events = $derived(getEvents().slice(0, maxEvents));
 	const connected = $derived(isConnected());
 
-	function typeColor(eventType: string): string {
-		if (eventType.includes('created')) return 'var(--color-accent)';
-		if (eventType.includes('verified') || eventType.includes('accepted'))
-			return 'var(--color-accepted)';
-		if (eventType.includes('rejected')) return 'var(--color-rejected)';
-		if (eventType.includes('record')) return '#f59e0b';
+	function parsePayload(payload: string | object): Record<string, unknown> {
+		try {
+			return typeof payload === 'string' ? JSON.parse(payload) : (payload as Record<string, unknown>);
+		} catch {
+			return {};
+		}
+	}
+
+	function typeColor(event: EventMessage): string {
+		const t = event.event_type;
+		if (t === 'challenge.created') return 'var(--color-accent)';
+		if (t === 'record.updated') return '#f59e0b';
+		if (t === 'graph.verified') {
+			const p = parsePayload(event.payload);
+			return p.verdict === 'accepted' ? 'var(--color-accepted)' : 'var(--color-rejected)';
+		}
+		if (t === 'graph.submitted') return 'var(--color-text)';
 		return 'var(--color-text-muted)';
 	}
 
-	function summarizePayload(payload: string): string {
-		try {
-			const p = typeof payload === 'string' ? JSON.parse(payload) : payload;
-			if (p.challenge_id) return p.challenge_id;
-			if (p.graph_cid) return p.graph_cid.slice(0, 12) + '...';
-			return JSON.stringify(p).slice(0, 40);
-		} catch {
-			return String(payload).slice(0, 40);
+	function typeLabel(event: EventMessage): string {
+		const t = event.event_type;
+		if (t === 'graph.verified') {
+			const p = parsePayload(event.payload);
+			return p.verdict === 'accepted' ? 'verified' : 'rejected';
 		}
+		if (t === 'challenge.created') return 'new challenge';
+		if (t === 'graph.submitted') return 'submitted';
+		if (t === 'record.updated') return 'new record';
+		return t;
+	}
+
+	function detail(event: EventMessage): string {
+		const p = parsePayload(event.payload);
+		const cid = p.challenge_id as string | undefined;
+		switch (event.event_type) {
+			case 'challenge.created':
+				return `${cid}  R(${p.k},${p.ell})`;
+			case 'graph.submitted':
+				return `${cid}  n=${p.n}`;
+			case 'graph.verified': {
+				const parts: string[] = [cid ?? ''];
+				if (p.n != null) parts.push(`n=${p.n}`);
+				if (p.reason) parts.push(String(p.reason));
+				return parts.join('  ');
+			}
+			case 'record.updated':
+				return `${cid}  n=${p.best_n}`;
+			default: {
+				if (cid) return cid;
+				return JSON.stringify(p).slice(0, 40);
+			}
+		}
+	}
+
+	function getCid(event: EventMessage): string | null {
+		const p = parsePayload(event.payload);
+		return (p.graph_cid as string) ?? (p.best_cid as string) ?? null;
+	}
+
+	function timeAgo(iso: string): string {
+		const now = Date.now();
+		const then = new Date(iso).getTime();
+		const sec = Math.floor((now - then) / 1000);
+		if (sec < 5) return 'just now';
+		if (sec < 60) return `${sec}s ago`;
+		const min = Math.floor(sec / 60);
+		if (min < 60) return `${min}m ago`;
+		const hr = Math.floor(min / 60);
+		if (hr < 24) return `${hr}h ago`;
+		const d = Math.floor(hr / 24);
+		return `${d}d ago`;
 	}
 </script>
 
@@ -46,10 +101,15 @@
 			{#each events as event (event.seq)}
 				<div class="event-row">
 					<span class="seq">#{event.seq}</span>
-					<span class="event-type" style="color: {typeColor(event.event_type)}">
-						{event.event_type}
+					<span class="event-type" style="color: {typeColor(event)}">
+						{typeLabel(event)}
 					</span>
-					<span class="payload">{summarizePayload(event.payload)}</span>
+					{#if getCid(event)}
+					<a class="detail detail-link" href="/submissions/{getCid(event)}">{detail(event)}</a>
+				{:else}
+					<span class="detail">{detail(event)}</span>
+				{/if}
+					<span class="time">{timeAgo(event.created_at)}</span>
 				</div>
 			{/each}
 		</div>
@@ -125,10 +185,27 @@
 		min-width: 8rem;
 	}
 
-	.payload {
+	.detail {
 		color: var(--color-text-muted);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		flex: 1;
+	}
+
+	.detail-link {
+		text-decoration: none;
+	}
+
+	.detail-link:hover {
+		color: var(--color-accent);
+	}
+
+	.time {
+		color: var(--color-text-muted);
+		opacity: 0.6;
+		white-space: nowrap;
+		margin-left: auto;
+		font-size: 0.6875rem;
 	}
 </style>

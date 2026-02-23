@@ -305,6 +305,7 @@ async fn submit_graph(
             json!({
                 "graph_cid": cid_hex,
                 "challenge_id": req.challenge_id,
+                "n": n,
                 "verdict": verdict_str,
                 "reason": reason,
                 "witness": witness,
@@ -353,6 +354,40 @@ async fn submit_graph(
             "is_new_record": is_new_record,
         })),
     ))
+}
+
+/// Get full submission detail by CID.
+async fn get_submission(
+    State(state): State<Arc<AppState>>,
+    Path(cid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let ledger = state.ledger.clone();
+    let detail = tokio::task::spawn_blocking(move || ledger.get_submission_detail(&cid))
+        .await
+        .unwrap()
+        .map_err(map_ledger_error)?;
+
+    let (submission, receipt, challenge) = detail.ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Submission not found" })),
+        )
+    })?;
+
+    let rgxf: Option<Value> = serde_json::from_str(&submission.rgxf_json).ok();
+
+    Ok(Json(json!({
+        "graph_cid": submission.graph_cid,
+        "challenge_id": submission.challenge_id,
+        "n": submission.n,
+        "rgxf": rgxf,
+        "submitted_at": submission.submitted_at,
+        "verdict": receipt.as_ref().map(|r| &r.verdict),
+        "reason": receipt.as_ref().and_then(|r| r.reason.as_ref()),
+        "witness": receipt.as_ref().and_then(|r| r.witness.as_ref()),
+        "verified_at": receipt.as_ref().map(|r| &r.verified_at),
+        "challenge": challenge,
+    })))
 }
 
 /// OESP-1 WebSocket event stream.
@@ -428,6 +463,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/challenges/{id}", get(get_challenge))
         .route("/api/records", get(list_records))
+        .route("/api/submissions/{cid}", get(get_submission))
         .route("/api/verify", post(verify))
         .route("/api/submit", post(submit_graph))
         .route("/api/events", get(ws_events))

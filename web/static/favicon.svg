@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- K5 complete graph: 5 vertices on a circle with all 10 edges -->
+  <!-- Vertices at radius 12 from center (16,16) -->
+  <!-- v0=(16,4) v1=(27.4,12.7) v2=(23,26.7) v3=(9,26.7) v4=(4.6,12.7) -->
+  <g stroke="#6366f1" stroke-width="1.5" stroke-linecap="round" fill="none">
+    <line x1="16" y1="4" x2="27.4" y2="12.7"/>
+    <line x1="16" y1="4" x2="23" y2="26.7"/>
+    <line x1="16" y1="4" x2="9" y2="26.7"/>
+    <line x1="16" y1="4" x2="4.6" y2="12.7"/>
+    <line x1="27.4" y1="12.7" x2="23" y2="26.7"/>
+    <line x1="27.4" y1="12.7" x2="9" y2="26.7"/>
+    <line x1="27.4" y1="12.7" x2="4.6" y2="12.7"/>
+    <line x1="23" y1="26.7" x2="9" y2="26.7"/>
+    <line x1="23" y1="26.7" x2="4.6" y2="12.7"/>
+    <line x1="9" y1="26.7" x2="4.6" y2="12.7"/>
+  </g>
+  <g fill="#6366f1">
+    <circle cx="16" cy="4" r="2.5"/>
+    <circle cx="27.4" cy="12.7" r="2.5"/>
+    <circle cx="23" cy="26.7" r="2.5"/>
+    <circle cx="9" cy="26.7" r="2.5"/>
+    <circle cx="4.6" cy="12.7" r="2.5"/>
+  </g>
+</svg>

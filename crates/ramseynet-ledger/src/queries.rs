@@ -241,6 +241,80 @@ impl Ledger {
         .optional()
         .map_err(LedgerError::Db)
     }
+
+    /// Get full submission detail by CID: submission + optional receipt + optional challenge.
+    pub fn get_submission_detail(
+        &self,
+        cid: &str,
+    ) -> Result<Option<(Submission, Option<Receipt>, Option<Challenge>)>, LedgerError> {
+        let conn = self.conn.lock().unwrap();
+
+        // 1. Get submission
+        let submission: Option<Submission> = conn
+            .query_row(
+                "SELECT graph_cid, challenge_id, n, rgxf_json, submitted_at FROM graph_submissions WHERE graph_cid = ?1",
+                params![cid],
+                |row| {
+                    Ok(Submission {
+                        graph_cid: row.get(0)?,
+                        challenge_id: row.get(1)?,
+                        n: row.get(2)?,
+                        rgxf_json: row.get(3)?,
+                        submitted_at: parse_datetime(row.get::<_, String>(4)?),
+                    })
+                },
+            )
+            .optional()
+            .map_err(LedgerError::Db)?;
+
+        let submission = match submission {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        // 2. Get receipt (optional — may not be verified yet)
+        let receipt: Option<Receipt> = conn
+            .query_row(
+                "SELECT receipt_id, graph_cid, challenge_id, verdict, reason, witness_json, verified_at FROM verify_receipts WHERE graph_cid = ?1",
+                params![cid],
+                |row| {
+                    let witness_str: Option<String> = row.get(5)?;
+                    let witness: Option<Vec<u32>> =
+                        witness_str.and_then(|s| serde_json::from_str(&s).ok());
+                    Ok(Receipt {
+                        receipt_id: row.get(0)?,
+                        graph_cid: row.get(1)?,
+                        challenge_id: row.get(2)?,
+                        verdict: row.get(3)?,
+                        reason: row.get(4)?,
+                        witness,
+                        verified_at: parse_datetime(row.get::<_, String>(6)?),
+                    })
+                },
+            )
+            .optional()
+            .map_err(LedgerError::Db)?;
+
+        // 3. Get challenge context
+        let challenge: Option<Challenge> = conn
+            .query_row(
+                "SELECT challenge_id, k, ell, description, created_at FROM challenges WHERE challenge_id = ?1",
+                params![submission.challenge_id],
+                |row| {
+                    Ok(Challenge {
+                        challenge_id: row.get(0)?,
+                        k: row.get(1)?,
+                        ell: row.get(2)?,
+                        description: row.get(3)?,
+                        created_at: parse_datetime(row.get::<_, String>(4)?),
+                    })
+                },
+            )
+            .optional()
+            .map_err(LedgerError::Db)?;
+
+        Ok(Some((submission, receipt, challenge)))
+    }
 }
 
 // ── Event operations ─────────────────────────────────────────────────

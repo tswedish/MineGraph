@@ -57,6 +57,19 @@ export interface SubmitResponse {
 	is_new_record: boolean;
 }
 
+export interface SubmissionDetail {
+	graph_cid: string;
+	challenge_id: string;
+	n: number;
+	rgxf: RgxfJson | null;
+	submitted_at: string;
+	verdict: string | null;
+	reason: string | null;
+	witness: number[] | null;
+	verified_at: string | null;
+	challenge: Challenge | null;
+}
+
 export interface EventMessage {
 	seq: number;
 	event_type: string;
@@ -131,6 +144,15 @@ export async function submitGraph(req: SubmitRequest): Promise<SubmitResponse> {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(req)
 	});
+	if (!res.ok) {
+		const err = await res.json();
+		throw new Error(err.error || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function getSubmission(cid: string): Promise<SubmissionDetail> {
+	const res = await fetch(`${BASE}/submissions/${encodeURIComponent(cid)}`);
 	if (!res.ok) {
 		const err = await res.json();
 		throw new Error(err.error || `HTTP ${res.status}`);
