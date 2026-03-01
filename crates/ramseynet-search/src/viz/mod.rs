@@ -9,11 +9,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use ramseynet_graph::{rgxf, AdjacencyMatrix};
-use ramseynet_verifier::clique::find_clique_witness;
+use ramseynet_verifier::clique::count_cliques;
 use serde::Serialize;
 use tokio::sync::{broadcast, watch};
 
-/// Rarity tier for a valid Ramsey graph based on clique/independence proximity.
+/// Rarity tier for a valid Ramsey graph based on near-miss clique/independent-set counts.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RarityTier {
@@ -23,46 +23,64 @@ pub enum RarityTier {
     Legendary,
 }
 
-/// Compute the rarity tier of a valid R(k, ell) graph.
+/// Rarity details for a valid graph.
+#[derive(Clone, Debug, Serialize)]
+pub struct RarityInfo {
+    pub tier: RarityTier,
+    /// Number of (k-1)-cliques in G (near-miss clique violations).
+    pub clique_count: u64,
+    /// Number of (ell-1)-independent sets in G (near-miss indep-set violations).
+    pub indep_count: u64,
+}
+
+/// Compute the rarity of a valid R(k, ell) graph based on how many near-miss
+/// structures it contains.
 ///
-/// Returns `(tier, omega, alpha)` where omega is the clique number and
-/// alpha is the independence number.
+/// Counts (k-1)-cliques and (ell-1)-independent sets. Fewer near-misses on
+/// both sides means the graph is "tighter" against the Ramsey bound and rarer.
+///
+/// Thresholds scale with n so tiers stay meaningful across graph sizes:
+/// - Rare: both counts <= n
+/// - Uncommon: both counts <= n^2
+/// - Common: everything else
 pub fn compute_rarity(
     graph: &AdjacencyMatrix,
     k: u32,
     ell: u32,
     is_record: bool,
-) -> (RarityTier, u32, u32) {
-    // Find omega: largest clique in G
-    let mut omega = 1;
-    for size in (2..k).rev() {
-        if find_clique_witness(graph, size).is_some() {
-            omega = size;
-            break;
-        }
-    }
+) -> RarityInfo {
+    let n = graph.n() as u64;
 
-    // Find alpha: largest independent set = largest clique in complement
-    let comp = graph.complement();
-    let mut alpha = 1;
-    for size in (2..ell).rev() {
-        if find_clique_witness(&comp, size).is_some() {
-            alpha = size;
-            break;
-        }
-    }
+    // Count (k-1)-cliques in G
+    let clique_count = if k >= 2 {
+        count_cliques(graph, k - 1)
+    } else {
+        0
+    };
+
+    // Count (ell-1)-independent sets = (ell-1)-cliques in complement
+    let indep_count = if ell >= 2 {
+        let comp = graph.complement();
+        count_cliques(&comp, ell - 1)
+    } else {
+        0
+    };
 
     let tier = if is_record {
         RarityTier::Legendary
-    } else if omega == k - 1 && alpha == ell - 1 {
+    } else if clique_count <= n && indep_count <= n {
         RarityTier::Rare
-    } else if omega == k - 1 || alpha == ell - 1 {
+    } else if clique_count <= n * n && indep_count <= n * n {
         RarityTier::Uncommon
     } else {
         RarityTier::Common
     };
 
-    (tier, omega, alpha)
+    RarityInfo {
+        tier,
+        clique_count,
+        indep_count,
+    }
 }
 
 /// A snapshot of the current search state, sent to the browser at ~20fps.
@@ -92,8 +110,8 @@ pub struct PinnedGraph {
     pub is_record: bool,
     pub found_at_ms: u64,
     pub rarity: RarityTier,
-    pub omega: u32,
-    pub alpha: u32,
+    pub clique_count: u64,
+    pub indep_count: u64,
 }
 
 /// Tagged message sent over the WebSocket.
@@ -136,7 +154,6 @@ impl VizHandle {
         let _ = self.snapshot_tx.send(Some(snapshot));
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn pin_graph(
         &self,
         graph: &AdjacencyMatrix,
@@ -144,9 +161,7 @@ impl VizHandle {
         strategy: &str,
         iteration: u64,
         is_record: bool,
-        rarity: RarityTier,
-        omega: u32,
-        alpha: u32,
+        rarity_info: RarityInfo,
     ) {
         let pinned = PinnedGraph {
             graph: rgxf::to_json(graph),
@@ -155,9 +170,9 @@ impl VizHandle {
             iteration,
             is_record,
             found_at_ms: self.start_time.elapsed().as_millis() as u64,
-            rarity,
-            omega,
-            alpha,
+            rarity: rarity_info.tier,
+            clique_count: rarity_info.clique_count,
+            indep_count: rarity_info.indep_count,
         };
         let _ = self.pinned_tx.send(pinned);
     }

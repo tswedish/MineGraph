@@ -57,6 +57,51 @@ fn backtrack(adj: &AdjacencyMatrix, current: &mut Vec<u32>, start: u32, k: u32) 
     false
 }
 
+/// Count the number of cliques of exactly size `k` in the graph.
+///
+/// Uses the same backtracking approach as `find_clique_witness` but
+/// exhaustively enumerates all k-cliques instead of stopping at the first.
+pub fn count_cliques(adj: &AdjacencyMatrix, k: u32) -> u64 {
+    if k == 0 {
+        return 1;
+    }
+    let n = adj.n();
+    if k == 1 {
+        return n as u64;
+    }
+    if k > n {
+        return 0;
+    }
+    let mut current = Vec::with_capacity(k as usize);
+    let mut count = 0u64;
+    count_backtrack(adj, &mut current, 0, k, &mut count);
+    count
+}
+
+fn count_backtrack(adj: &AdjacencyMatrix, current: &mut Vec<u32>, start: u32, k: u32, count: &mut u64) {
+    if current.len() as u32 == k {
+        *count += 1;
+        return;
+    }
+
+    let remaining = k - current.len() as u32;
+    let n = adj.n();
+
+    if n - start < remaining {
+        return;
+    }
+
+    for v in start..n {
+        let connected_to_all = current.iter().all(|&u| adj.edge(u, v));
+        if !connected_to_all {
+            continue;
+        }
+        current.push(v);
+        count_backtrack(adj, current, v + 1, k, count);
+        current.pop();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -464,7 +464,7 @@ function handlePinned(pinned) {
   info.className = 'pinned-info';
   const rarityLabel = rarity.charAt(0).toUpperCase() + rarity.slice(1);
   const badge = '<span class="rarity-badge ' + rarity + '">' + rarityLabel + '</span>';
-  const oa = ' <span class="iter-label">\u03c9=' + (pinned.omega||0) + ' \u03b1=' + (pinned.alpha||0) + '</span>';
+  const oa = ' <span class="iter-label">K' + (pinned.clique_count!=null?pinned.clique_count:'?') + ' I' + (pinned.indep_count!=null?pinned.indep_count:'?') + '</span>';
   info.innerHTML =
     '<span class="n-label" style="color:' + RARITY_COLORS[rarity] + '">n=' + pinned.n + '</span>' + badge + '<br>' +
     '<span class="strategy-label">' + pinned.strategy + '</span>' + oa + '<br>' +

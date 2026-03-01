@@ -116,15 +116,16 @@ pub async fn run_worker(
             let elapsed = start.elapsed();
 
             if result.valid {
-                let (rarity, omega, alpha) =
-                    compute_rarity(&result.graph, k, ell, false);
+                let rarity_info = compute_rarity(&result.graph, k, ell, false);
                 info!(
                     strategy,
                     target_n,
                     iterations = result.iterations,
                     edges = result.graph.num_edges(),
                     elapsed_ms = elapsed.as_millis() as u64,
-                    ?rarity, omega, alpha,
+                    rarity = ?rarity_info.tier,
+                    cliques = rarity_info.clique_count,
+                    indep_sets = rarity_info.indep_count,
                     "found valid graph!"
                 );
 
@@ -132,7 +133,7 @@ pub async fn run_worker(
                 if let Some(ref vh) = viz_handle {
                     vh.pin_graph(
                         &result.graph, target_n, strategy, result.iterations,
-                        false, rarity.clone(), omega, alpha,
+                        false, rarity_info,
                     );
                 }
 
@@ -150,11 +151,10 @@ pub async fn run_worker(
                         if is_record {
                             info!("new record! n={target_n}");
                             if let Some(ref vh) = viz_handle {
-                                let (rec_rarity, rec_omega, rec_alpha) =
-                                    compute_rarity(&result.graph, k, ell, true);
+                                let rec_rarity = compute_rarity(&result.graph, k, ell, true);
                                 vh.pin_graph(
                                     &result.graph, target_n, strategy, result.iterations,
-                                    true, rec_rarity, rec_omega, rec_alpha,
+                                    true, rec_rarity,
                                 );
                             }
                         }
@@ -263,8 +263,7 @@ async fn run_worker_offline(
             let elapsed = start.elapsed();
 
             if result.valid {
-                let (rarity, omega, alpha) =
-                    compute_rarity(&result.graph, k, ell, false);
+                let rarity_info = compute_rarity(&result.graph, k, ell, false);
                 info!(
                     strategy,
                     target_n,
@@ -272,14 +271,16 @@ async fn run_worker_offline(
                     iterations = result.iterations,
                     edges = result.graph.num_edges(),
                     elapsed_ms = elapsed.as_millis() as u64,
-                    ?rarity, omega, alpha,
+                    rarity = ?rarity_info.tier,
+                    cliques = rarity_info.clique_count,
+                    indep_sets = rarity_info.indep_count,
                     "found valid graph (offline)"
                 );
 
                 if let Some(ref vh) = viz_handle {
                     vh.pin_graph(
                         &result.graph, target_n, strategy, result.iterations,
-                        false, rarity, omega, alpha,
+                        false, rarity_info,
                     );
                 }
             } else {
