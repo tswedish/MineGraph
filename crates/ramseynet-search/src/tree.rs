@@ -1,0 +1,274 @@
+use std::collections::HashSet;
+
+use rand::rngs::SmallRng;
+use rand::seq::SliceRandom;
+use ramseynet_graph::{compute_cid, AdjacencyMatrix};
+use ramseynet_types::GraphCid;
+use ramseynet_verifier::clique::count_cliques;
+
+use crate::init::{init_graph, InitStrategy};
+use crate::search::{SearchResult, Searcher};
+use crate::viz::SearchObserver;
+
+/// Beam search over single-edge flips from an algebraic seed graph.
+///
+/// Systematically explores the neighborhood of Paley (or other) seed graphs
+/// by maintaining a beam of the best candidates at each depth level. Uses
+/// CID-based deduplication to avoid revisiting the same graph.
+pub struct TreeSearcher {
+    pub beam_width: usize,
+    pub max_depth: u32,
+    pub init_strategy: InitStrategy,
+}
+
+impl Default for TreeSearcher {
+    fn default() -> Self {
+        Self {
+            beam_width: 100,
+            max_depth: 10,
+            init_strategy: InitStrategy::Paley,
+        }
+    }
+}
+
+/// Score a graph by counting violations: k-cliques + ell-cliques-in-complement.
+/// A score of 0 means the graph is valid.
+fn beam_score(graph: &AdjacencyMatrix, k: u32, ell: u32) -> u64 {
+    let comp = graph.complement();
+    count_cliques(graph, k) + count_cliques(&comp, ell)
+}
+
+impl Searcher for TreeSearcher {
+    fn search(
+        &self,
+        n: u32,
+        k: u32,
+        ell: u32,
+        max_iters: u64,
+        rng: &mut SmallRng,
+        observer: &dyn SearchObserver,
+    ) -> SearchResult {
+        // Build list of all edges
+        let all_edges: Vec<(u32, u32)> = {
+            let mut v = Vec::with_capacity((n * (n - 1) / 2) as usize);
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    v.push((i, j));
+                }
+            }
+            v
+        };
+        let num_edges = all_edges.len();
+
+        // Initialize seed
+        let seed = init_graph(n, &self.init_strategy, rng);
+        let seed_cid = compute_cid(&seed);
+        let seed_score = beam_score(&seed, k, ell);
+
+        let mut seen: HashSet<GraphCid> = HashSet::new();
+        seen.insert(seed_cid);
+
+        let mut best_valid: Option<AdjacencyMatrix> = None;
+        let mut best_invalid: Option<(AdjacencyMatrix, u64)> = Some((seed.clone(), seed_score));
+        let mut iters_used: u64 = 1; // counted seed eval
+
+        if seed_score == 0 {
+            best_valid = Some(seed.clone());
+        }
+
+        observer.on_progress(
+            &seed, n, k, ell, "tree",
+            iters_used, max_iters, seed_score == 0, seed_score as u32,
+        );
+
+        // Current beam: Vec of (graph, score)
+        let mut beam: Vec<(AdjacencyMatrix, u64)> = vec![(seed, seed_score)];
+
+        for _depth in 0..self.max_depth {
+            if iters_used >= max_iters || beam.is_empty() {
+                break;
+            }
+
+            let remaining = max_iters.saturating_sub(iters_used);
+            let full_budget = num_edges as u64 * beam.len() as u64;
+
+            // Determine how many edges to sample per parent
+            let edges_per_parent = if full_budget > remaining {
+                // Budget-limited: sample edges
+                let per = remaining / beam.len().max(1) as u64;
+                (per as usize).max(1).min(num_edges)
+            } else {
+                num_edges
+            };
+
+            let mut candidates: Vec<(AdjacencyMatrix, u64)> = Vec::new();
+
+            for (parent, _parent_score) in &beam {
+                if iters_used >= max_iters {
+                    break;
+                }
+
+                // Get edges to try (full or sampled)
+                let edges_to_try: Vec<(u32, u32)> = if edges_per_parent < num_edges {
+                    let mut shuffled = all_edges.clone();
+                    let (selected, _) = shuffled.partial_shuffle(rng, edges_per_parent);
+                    selected.to_vec()
+                } else {
+                    all_edges.clone()
+                };
+
+                for &(i, j) in &edges_to_try {
+                    if iters_used >= max_iters {
+                        break;
+                    }
+
+                    let mut child = parent.clone();
+                    let current = child.edge(i, j);
+                    child.set_edge(i, j, !current);
+
+                    let cid = compute_cid(&child);
+                    if !seen.insert(cid) {
+                        // Already visited
+                        continue;
+                    }
+
+                    let score = beam_score(&child, k, ell);
+                    iters_used += 1;
+
+                    if score == 0 {
+                        // Valid graph found
+                        if best_valid.is_none() {
+                            observer.on_progress(
+                                &child, n, k, ell, "tree",
+                                iters_used, max_iters, true, 0,
+                            );
+                        }
+                        best_valid = Some(child.clone());
+                    }
+
+                    // Track best invalid
+                    if let Some((_, best_inv_score)) = &best_invalid {
+                        if score < *best_inv_score {
+                            best_invalid = Some((child.clone(), score));
+                        }
+                    }
+
+                    candidates.push((child, score));
+
+                    // Throttled progress via observer (every 100 evals to reduce overhead)
+                    if iters_used.is_multiple_of(100) {
+                        let display_graph = if let Some(ref v) = best_valid {
+                            v
+                        } else if let Some((ref inv, _)) = best_invalid {
+                            inv
+                        } else {
+                            &candidates.last().unwrap().0
+                        };
+                        let display_score = if best_valid.is_some() {
+                            0
+                        } else {
+                            best_invalid.as_ref().map(|(_, s)| *s as u32).unwrap_or(score as u32)
+                        };
+                        observer.on_progress(
+                            display_graph, n, k, ell, "tree",
+                            iters_used, max_iters, best_valid.is_some(), display_score,
+                        );
+                    }
+                }
+            }
+
+            if candidates.is_empty() {
+                break;
+            }
+
+            // Sort by score ascending, keep top beam_width
+            candidates.sort_by_key(|(_, s)| *s);
+            candidates.truncate(self.beam_width);
+            beam = candidates;
+        }
+
+        // Return best valid, or best invalid
+        if let Some(graph) = best_valid {
+            SearchResult {
+                graph,
+                valid: true,
+                iterations: iters_used,
+            }
+        } else if let Some((graph, _)) = best_invalid {
+            SearchResult {
+                graph,
+                valid: false,
+                iterations: iters_used,
+            }
+        } else {
+            // Shouldn't happen (seed is always evaluated), but handle gracefully
+            SearchResult {
+                graph: AdjacencyMatrix::new(n),
+                valid: false,
+                iterations: iters_used,
+            }
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "tree"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::viz::NoOpObserver;
+    use rand::SeedableRng;
+
+    #[test]
+    fn tree_finds_valid_r33_n5() {
+        // Paley(5) = C5 is valid for R(3,3), seed should be immediately valid
+        let searcher = TreeSearcher::default();
+        let mut rng = SmallRng::seed_from_u64(42);
+        let result = searcher.search(5, 3, 3, 10_000, &mut rng, &NoOpObserver);
+        assert!(result.valid, "tree search should find a valid R(3,3) graph on 5 vertices");
+        assert_eq!(result.graph.n(), 5);
+    }
+
+    #[test]
+    fn tree_fails_r33_n6() {
+        // R(3,3) = 6, so no valid graph exists for n=6
+        let searcher = TreeSearcher {
+            beam_width: 50,
+            max_depth: 5,
+            init_strategy: InitStrategy::Paley,
+        };
+        let mut rng = SmallRng::seed_from_u64(42);
+        let result = searcher.search(6, 3, 3, 10_000, &mut rng, &NoOpObserver);
+        assert!(!result.valid, "no valid R(3,3) graph exists on 6 vertices");
+    }
+
+    #[test]
+    fn tree_finds_valid_r44_n17() {
+        // Paley(17) is the unique valid R(4,4) graph on 17 vertices
+        let searcher = TreeSearcher::default();
+        let mut rng = SmallRng::seed_from_u64(42);
+        let result = searcher.search(17, 4, 4, 100_000, &mut rng, &NoOpObserver);
+        assert!(result.valid, "tree search should find a valid R(4,4) graph on 17 vertices");
+        assert_eq!(result.graph.n(), 17);
+    }
+
+    #[test]
+    fn tree_respects_budget() {
+        let max_iters = 500u64;
+        let searcher = TreeSearcher {
+            beam_width: 100,
+            max_depth: 20,
+            init_strategy: InitStrategy::Paley,
+        };
+        let mut rng = SmallRng::seed_from_u64(42);
+        let result = searcher.search(10, 4, 4, max_iters, &mut rng, &NoOpObserver);
+        assert!(
+            result.iterations <= max_iters,
+            "iterations {} should not exceed budget {}",
+            result.iterations,
+            max_iters
+        );
+    }
+}

@@ -10,6 +10,7 @@ pub mod greedy;
 pub mod init;
 pub mod local_search;
 pub mod search;
+pub mod tree;
 pub mod viz;
 pub mod worker;
 

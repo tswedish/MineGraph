@@ -11,6 +11,7 @@ use ramseynet_search::greedy::GreedySearcher;
 use ramseynet_search::init::InitStrategy;
 use ramseynet_search::local_search::LocalSearcher;
 use ramseynet_search::search::Searcher;
+use ramseynet_search::tree::TreeSearcher;
 use ramseynet_search::viz::VizHandle;
 use ramseynet_search::worker::{run_worker, WorkerConfig};
 
@@ -64,6 +65,14 @@ struct Cli {
     /// Graph initialization: paley (default), perturbed-paley, random, balanced
     #[arg(long, default_value = "perturbed-paley")]
     init: String,
+
+    /// Beam width for tree search
+    #[arg(long, default_value = "100")]
+    beam_width: usize,
+
+    /// Maximum search depth for tree search
+    #[arg(long, default_value = "10")]
+    max_depth: u32,
 }
 
 #[tokio::main]
@@ -105,6 +114,11 @@ async fn main() -> Result<()> {
             cooling_rate: cli.cooling_rate,
             init_strategy: init_strategy.clone(),
         })],
+        "tree" => vec![Box::new(TreeSearcher {
+            beam_width: cli.beam_width,
+            max_depth: cli.max_depth,
+            init_strategy: init_strategy.clone(),
+        })],
         "all" => vec![
             Box::new(GreedySearcher),
             Box::new(LocalSearcher {
@@ -114,10 +128,15 @@ async fn main() -> Result<()> {
             Box::new(AnnealingSearcher {
                 initial_temp: cli.initial_temp,
                 cooling_rate: cli.cooling_rate,
+                init_strategy: init_strategy.clone(),
+            }),
+            Box::new(TreeSearcher {
+                beam_width: cli.beam_width,
+                max_depth: cli.max_depth,
                 init_strategy,
             }),
         ],
-        other => anyhow::bail!("unknown strategy: {other} (use greedy, local, annealing, or all)"),
+        other => anyhow::bail!("unknown strategy: {other} (use greedy, local, annealing, tree, or all)"),
     };
 
     if cli.offline && cli.start_n.is_none() {
