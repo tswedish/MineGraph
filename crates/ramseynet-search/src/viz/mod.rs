@@ -329,7 +329,8 @@ impl SearchObserver for VizObserver {
         strategy: &str,
         iteration: u64,
     ) {
-        let score = ramseynet_verifier::scoring::compute_score(graph);
+        let cid = compute_cid(graph);
+        let score = ramseynet_verifier::scoring::compute_score(graph, &cid);
         self.handle
             .submit_discovery(graph, n, strategy, iteration, false, score);
     }

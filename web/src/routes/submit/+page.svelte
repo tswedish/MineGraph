@@ -9,7 +9,7 @@
 <div class="page">
 	<h1>Submit a Graph</h1>
 	<p class="subtitle">
-		Paste an RGXF-encoded graph to verify and submit against a challenge.
+		Paste an RGXF-encoded graph to verify and submit for leaderboard ranking.
 	</p>
 	<SubmitForm />
 </div>

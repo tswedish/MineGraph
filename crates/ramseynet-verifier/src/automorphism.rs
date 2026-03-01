@@ -101,7 +101,7 @@ mod tests {
             [1, 2, 4, 8, 9, 13, 15, 16].into_iter().collect();
         for i in 0..17u32 {
             for j in (i + 1)..17 {
-                let diff = if j > i { j - i } else { i - j };
+                let diff = j.abs_diff(i);
                 let d = diff.min(17 - diff);
                 if qr.contains(&d) {
                     g.set_edge(i, j, true);

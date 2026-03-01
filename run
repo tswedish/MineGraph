@@ -12,6 +12,7 @@
 #   web-dev    pnpm dev (live reload on :5173)
 #   server     API server on :3001
 #   server-log API server with file logging (logs/)
-#   seed       Seed DB with test challenges + graphs
+#   search     Search worker (requires --k, --ell, --n)
+#   seed       Seed DB with test graphs
 
 exec bash "$(dirname "$0")/scripts/wsl-dev.sh" "$@"

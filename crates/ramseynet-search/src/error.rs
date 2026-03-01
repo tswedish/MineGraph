@@ -8,9 +8,6 @@ pub enum SearchError {
     #[error("server returned error: {0}")]
     ServerError(String),
 
-    #[error("challenge not found: {0}")]
-    ChallengeNotFound(String),
-
     #[error("shutdown signal received")]
     Shutdown,
 

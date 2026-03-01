@@ -3,25 +3,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::SearchError;
 
-/// Challenge info returned by the server.
+/// Threshold info returned by the server.
 #[derive(Debug, Deserialize)]
-pub struct ChallengeInfo {
-    pub challenge: ChallengeDetail,
-    pub record: Option<RecordInfo>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ChallengeDetail {
-    pub challenge_id: String,
-    pub k: u32,
-    pub ell: u32,
-    pub description: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RecordInfo {
-    pub best_n: u32,
-    pub best_cid: String,
+pub struct ThresholdResponse {
+    pub entry_count: u32,
+    pub capacity: u32,
+    pub worst_tier1_max: Option<u64>,
+    pub worst_tier1_min: Option<u64>,
+    pub worst_tier2_aut: Option<f64>,
+    pub worst_tier3_cid: Option<String>,
 }
 
 /// Submit response from the server.
@@ -29,14 +19,17 @@ pub struct RecordInfo {
 pub struct SubmitResponse {
     pub graph_cid: String,
     pub verdict: String,
-    pub is_new_record: Option<bool>,
+    pub admitted: Option<bool>,
+    pub rank: Option<u32>,
     pub reason: Option<String>,
     pub witness: Option<Vec<u32>>,
 }
 
 #[derive(Serialize)]
 struct SubmitRequest {
-    challenge_id: String,
+    k: u32,
+    ell: u32,
+    n: u32,
     graph: RgxfJson,
 }
 
@@ -54,14 +47,18 @@ impl ServerClient {
         }
     }
 
-    /// Fetch challenge details and current record.
-    pub async fn get_challenge(&self, challenge_id: &str) -> Result<ChallengeInfo, SearchError> {
-        let url = format!("{}/api/challenges/{}", self.base_url, challenge_id);
+    /// Fetch the admission threshold for a (k, ell, n) leaderboard.
+    pub async fn get_threshold(
+        &self,
+        k: u32,
+        ell: u32,
+        n: u32,
+    ) -> Result<ThresholdResponse, SearchError> {
+        let url = format!(
+            "{}/api/leaderboards/{}/{}/{}/threshold",
+            self.base_url, k, ell, n
+        );
         let resp = self.client.get(&url).send().await?;
-
-        if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(SearchError::ChallengeNotFound(challenge_id.to_string()));
-        }
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -69,21 +66,20 @@ impl ServerClient {
             return Err(SearchError::ServerError(format!("{status}: {body}")));
         }
 
-        let info: ChallengeInfo = resp.json().await?;
+        let info: ThresholdResponse = resp.json().await?;
         Ok(info)
     }
 
     /// Submit a graph to the server.
     pub async fn submit(
         &self,
-        challenge_id: &str,
+        k: u32,
+        ell: u32,
+        n: u32,
         graph: RgxfJson,
     ) -> Result<SubmitResponse, SearchError> {
         let url = format!("{}/api/submit", self.base_url);
-        let body = SubmitRequest {
-            challenge_id: challenge_id.to_string(),
-            graph,
-        };
+        let body = SubmitRequest { k, ell, n, graph };
 
         let resp = self.client.post(&url).json(&body).send().await?;
 

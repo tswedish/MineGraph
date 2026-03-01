@@ -8,7 +8,7 @@ use ramseynet_verifier::clique::count_cliques;
 
 use crate::init::{init_graph, InitStrategy};
 use crate::search::{SearchResult, Searcher};
-use crate::viz::SearchObserver;
+use crate::viz::{ProgressInfo, SearchObserver};
 
 /// Beam search over single-edge flips from an algebraic seed graph.
 ///
@@ -31,11 +31,12 @@ impl Default for TreeSearcher {
     }
 }
 
-/// Score a graph by counting violations: k-cliques + ell-cliques-in-complement.
-/// A score of 0 means the graph is valid.
-fn beam_score(graph: &AdjacencyMatrix, k: u32, ell: u32) -> u64 {
-    let comp = graph.complement();
-    count_cliques(graph, k) + count_cliques(&comp, ell)
+/// Score a graph by counting violations, returning (total, k_cliques, ell_indsets).
+/// A total of 0 means the graph is valid.
+fn beam_score_detail(graph: &AdjacencyMatrix, k: u32, ell: u32) -> (u64, u64, u64) {
+    let kc = count_cliques(graph, k);
+    let ei = count_cliques(&graph.complement(), ell);
+    (kc + ei, kc, ei)
 }
 
 impl Searcher for TreeSearcher {
@@ -63,23 +64,27 @@ impl Searcher for TreeSearcher {
         // Initialize seed
         let seed = init_graph(n, &self.init_strategy, rng);
         let seed_cid = compute_cid(&seed);
-        let seed_score = beam_score(&seed, k, ell);
+        let (seed_score, seed_kc, seed_ei) = beam_score_detail(&seed, k, ell);
 
         let mut seen: HashSet<GraphCid> = HashSet::new();
         seen.insert(seed_cid);
 
         let mut best_valid: Option<AdjacencyMatrix> = None;
-        let mut best_invalid: Option<(AdjacencyMatrix, u64)> = Some((seed.clone(), seed_score));
+        let mut best_invalid: Option<(AdjacencyMatrix, u64, u64, u64)> =
+            Some((seed.clone(), seed_score, seed_kc, seed_ei));
         let mut iters_used: u64 = 1; // counted seed eval
 
         if seed_score == 0 {
             best_valid = Some(seed.clone());
+            observer.on_valid_found(&seed, n, k, ell, "tree", iters_used);
         }
 
-        observer.on_progress(
-            &seed, n, k, ell, "tree",
-            iters_used, max_iters, seed_score == 0, seed_score as u32,
-        );
+        observer.on_progress(&ProgressInfo {
+            graph: &seed, n, k, ell, strategy: "tree",
+            iteration: iters_used, max_iters, valid: seed_score == 0,
+            violation_score: seed_score as u32,
+            k_cliques: Some(seed_kc), ell_indsets: Some(seed_ei),
+        });
 
         // Current beam: Vec of (graph, score)
         let mut beam: Vec<(AdjacencyMatrix, u64)> = vec![(seed, seed_score)];
@@ -132,24 +137,25 @@ impl Searcher for TreeSearcher {
                         continue;
                     }
 
-                    let score = beam_score(&child, k, ell);
+                    let (score, kc, ei) = beam_score_detail(&child, k, ell);
                     iters_used += 1;
 
                     if score == 0 {
-                        // Valid graph found
-                        if best_valid.is_none() {
-                            observer.on_progress(
-                                &child, n, k, ell, "tree",
-                                iters_used, max_iters, true, 0,
-                            );
-                        }
+                        // Valid graph found — submit immediately
+                        observer.on_valid_found(&child, n, k, ell, "tree", iters_used);
+                        observer.on_progress(&ProgressInfo {
+                            graph: &child, n, k, ell, strategy: "tree",
+                            iteration: iters_used, max_iters, valid: true,
+                            violation_score: 0,
+                            k_cliques: Some(0), ell_indsets: Some(0),
+                        });
                         best_valid = Some(child.clone());
                     }
 
                     // Track best invalid
-                    if let Some((_, best_inv_score)) = &best_invalid {
+                    if let Some((_, best_inv_score, _, _)) = &best_invalid {
                         if score < *best_inv_score {
-                            best_invalid = Some((child.clone(), score));
+                            best_invalid = Some((child.clone(), score, kc, ei));
                         }
                     }
 
@@ -157,22 +163,22 @@ impl Searcher for TreeSearcher {
 
                     // Throttled progress via observer (every 100 evals to reduce overhead)
                     if iters_used.is_multiple_of(100) {
-                        let display_graph = if let Some(ref v) = best_valid {
-                            v
-                        } else if let Some((ref inv, _)) = best_invalid {
-                            inv
-                        } else {
-                            &candidates.last().unwrap().0
-                        };
-                        let display_score = if best_valid.is_some() {
-                            0
-                        } else {
-                            best_invalid.as_ref().map(|(_, s)| *s as u32).unwrap_or(score as u32)
-                        };
-                        observer.on_progress(
-                            display_graph, n, k, ell, "tree",
-                            iters_used, max_iters, best_valid.is_some(), display_score,
-                        );
+                        let (display_graph, display_score, display_kc, display_ei) =
+                            if let Some(ref v) = best_valid {
+                                (v, 0u64, 0u64, 0u64)
+                            } else if let Some((ref inv, s, kc, ei)) = best_invalid {
+                                (inv, s, kc, ei)
+                            } else {
+                                (&candidates.last().unwrap().0, score, kc, ei)
+                            };
+                        observer.on_progress(&ProgressInfo {
+                            graph: display_graph, n, k, ell, strategy: "tree",
+                            iteration: iters_used, max_iters,
+                            valid: best_valid.is_some(),
+                            violation_score: display_score as u32,
+                            k_cliques: Some(display_kc),
+                            ell_indsets: Some(display_ei),
+                        });
                     }
                 }
             }
@@ -194,7 +200,7 @@ impl Searcher for TreeSearcher {
                 valid: true,
                 iterations: iters_used,
             }
-        } else if let Some((graph, _)) = best_invalid {
+        } else if let Some((graph, _, _, _)) = best_invalid {
             SearchResult {
                 graph,
                 valid: false,

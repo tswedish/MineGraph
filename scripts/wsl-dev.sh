@@ -16,7 +16,8 @@
 #   ci         - run full CI suite (clippy + test + web build)
 #   server     - start the API server on port 3001
 #   server-log - start the API server with file logging (logs/)
-#   seed       - seed the database with test challenges + graphs
+#   search     - start the search worker (requires --k, --ell, --n)
+#   seed       - seed the database with test graphs
 
 set -euo pipefail
 

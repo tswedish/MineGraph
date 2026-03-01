@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
-use ramseynet_graph::rgxf;
+use ramseynet_graph::{compute_cid, rgxf};
 use ramseynet_verifier::scoring::compute_score;
 use tokio::sync::watch;
 use tracing::{error, info, warn};
@@ -15,28 +15,12 @@ use crate::viz::{NoOpObserver, VizHandle, VizObserver};
 
 /// Configuration for the worker loop.
 pub struct WorkerConfig {
-    pub challenge_id: String,
-    pub start_n: Option<u32>,
+    pub k: u32,
+    pub ell: u32,
+    pub n: u32,
     pub max_iters: u64,
     pub no_backoff: bool,
     pub offline: bool,
-}
-
-/// Parse k, ell from a challenge ID like "ramsey:3:4:v1".
-fn parse_challenge_params(challenge_id: &str) -> Result<(u32, u32), SearchError> {
-    let parts: Vec<&str> = challenge_id.split(':').collect();
-    if parts.len() != 4 || parts[0] != "ramsey" {
-        return Err(SearchError::Other(format!(
-            "invalid challenge ID format: {challenge_id} (expected ramsey:K:L:vN)"
-        )));
-    }
-    let k: u32 = parts[1].parse().map_err(|_| {
-        SearchError::Other(format!("invalid k in challenge ID: {}", parts[1]))
-    })?;
-    let ell: u32 = parts[2].parse().map_err(|_| {
-        SearchError::Other(format!("invalid ell in challenge ID: {}", parts[2]))
-    })?;
-    Ok((k, ell))
 }
 
 /// Run the search worker loop.
@@ -54,6 +38,9 @@ pub async fn run_worker(
     let searchers: Vec<Arc<dyn Searcher>> = searchers.into_iter().map(Arc::from).collect();
     let mut rng = SmallRng::from_entropy();
     let mut consecutive_failures = 0u32;
+    let k = config.k;
+    let ell = config.ell;
+    let target_n = config.n;
 
     loop {
         // Check shutdown
@@ -62,24 +49,22 @@ pub async fn run_worker(
             return Ok(());
         }
 
-        // Fetch challenge info
-        let challenge = client.get_challenge(&config.challenge_id).await?;
-        let k = challenge.challenge.k;
-        let ell = challenge.challenge.ell;
-        let best_n = challenge.record.as_ref().map(|r| r.best_n);
+        // Fetch threshold
+        match client.get_threshold(k, ell, target_n).await {
+            Ok(info) => {
+                info!(
+                    k, ell, target_n,
+                    entries = info.entry_count,
+                    capacity = info.capacity,
+                    "fetched leaderboard threshold"
+                );
+            }
+            Err(e) => {
+                warn!("failed to fetch threshold: {e}");
+            }
+        }
 
-        let target_n = match (config.start_n, best_n) {
-            (Some(start), None) => start,
-            (Some(start), Some(best)) if start > best => start,
-            (_, Some(best)) => best + 1,
-            (None, None) => 2, // Start small if no record exists
-        };
-
-        info!(
-            challenge = %config.challenge_id,
-            k, ell, ?best_n, target_n,
-            "starting search round"
-        );
+        info!(k, ell, target_n, "starting search round");
 
         let mut found = false;
 
@@ -95,7 +80,7 @@ pub async fn run_worker(
 
             info!(strategy, target_n, max_iters, "running search");
 
-            // Run search in blocking thread (also computes score if valid)
+            // Run search in blocking thread
             let n = target_n;
             let searcher = Arc::clone(searcher);
             let mut search_rng = SmallRng::from_rng(&mut rng).unwrap();
@@ -111,7 +96,7 @@ pub async fn run_worker(
                     }
                 };
                 let score = if result.valid {
-                    Some(compute_score(&result.graph))
+                    Some(compute_score(&result.graph, &compute_cid(&result.graph)))
                 } else {
                     None
                 };
@@ -123,7 +108,7 @@ pub async fn run_worker(
             let elapsed = start.elapsed();
 
             if let Some(score) = score {
-                // Submit to leaderboard with pre-computed score
+                // Submit to viz leaderboard with pre-computed score
                 if let Some(ref vh) = viz_handle {
                     if let Some(entry) = vh.submit_discovery(
                         &result.graph, target_n, strategy, result.iterations,
@@ -155,19 +140,20 @@ pub async fn run_worker(
                     );
                 }
 
-                // Encode and submit
+                // Encode and submit to server
                 let rgxf_json = rgxf::to_json(&result.graph);
-                match client.submit(&config.challenge_id, rgxf_json).await {
+                match client.submit(k, ell, target_n, rgxf_json).await {
                     Ok(resp) => {
-                        let is_record = resp.is_new_record.unwrap_or(false);
+                        let admitted = resp.admitted.unwrap_or(false);
                         info!(
                             graph_cid = %resp.graph_cid,
                             verdict = %resp.verdict,
-                            is_new_record = is_record,
+                            admitted,
+                            rank = ?resp.rank,
                             "submitted graph"
                         );
-                        if is_record {
-                            info!("new record! n={target_n}");
+                        if admitted {
+                            info!("admitted to leaderboard! rank={}", resp.rank.unwrap_or(0));
                             if let Some(ref vh) = viz_handle {
                                 vh.submit_discovery(
                                     &result.graph, target_n, strategy, result.iterations,
@@ -228,11 +214,11 @@ async fn run_worker_offline(
     shutdown: watch::Receiver<bool>,
     viz_handle: Option<Arc<VizHandle>>,
 ) -> Result<(), SearchError> {
-    let (k, ell) = parse_challenge_params(&config.challenge_id)?;
-    let target_n = config.start_n.unwrap_or(2);
+    let k = config.k;
+    let ell = config.ell;
+    let target_n = config.n;
 
     info!(
-        challenge = %config.challenge_id,
         k, ell, target_n,
         "starting offline search (no server)"
     );
@@ -274,7 +260,7 @@ async fn run_worker_offline(
                     }
                 };
                 let score = if result.valid {
-                    Some(compute_score(&result.graph))
+                    Some(compute_score(&result.graph, &compute_cid(&result.graph)))
                 } else {
                     None
                 };

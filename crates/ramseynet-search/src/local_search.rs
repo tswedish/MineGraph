@@ -9,7 +9,7 @@ use ramseynet_verifier::verify_ramsey;
 
 use crate::init::{init_graph, InitStrategy};
 use crate::search::{SearchResult, Searcher};
-use crate::viz::SearchObserver;
+use crate::viz::{ProgressInfo, SearchObserver};
 
 /// Local search with tabu and restarts: start from a random graph, use
 /// witness-directed edge flips to repair violations, with a tabu list to
@@ -62,7 +62,11 @@ impl Searcher for LocalSearcher {
             if iter % FULL_SCORE_INTERVAL == 0 {
                 let score = violation_count(&graph, &complement, k, ell);
                 if score == 0 {
-                    observer.on_progress(&graph, n, k, ell, "local", iter + 1, max_iters, true, 0);
+                    observer.on_progress(&ProgressInfo {
+                        graph: &graph, n, k, ell, strategy: "local",
+                        iteration: iter + 1, max_iters, valid: true,
+                        violation_score: 0, k_cliques: None, ell_indsets: None,
+                    });
                     return SearchResult {
                         graph,
                         valid: true,
@@ -74,10 +78,11 @@ impl Searcher for LocalSearcher {
                     iters_since_improvement = 0;
                 }
 
-                observer.on_progress(
-                    &graph, n, k, ell, "local",
-                    iter, max_iters, false, score as u32,
-                );
+                observer.on_progress(&ProgressInfo {
+                    graph: &graph, n, k, ell, strategy: "local",
+                    iteration: iter, max_iters, valid: false,
+                    violation_score: score as u32, k_cliques: None, ell_indsets: None,
+                });
             }
 
             iters_since_improvement += 1;
@@ -102,7 +107,11 @@ impl Searcher for LocalSearcher {
                 (w, false)
             } else {
                 // No violations found — graph is valid!
-                observer.on_progress(&graph, n, k, ell, "local", iter + 1, max_iters, true, 0);
+                observer.on_progress(&ProgressInfo {
+                    graph: &graph, n, k, ell, strategy: "local",
+                    iteration: iter + 1, max_iters, valid: true,
+                    violation_score: 0, k_cliques: None, ell_indsets: None,
+                });
                 return SearchResult {
                     graph,
                     valid: true,

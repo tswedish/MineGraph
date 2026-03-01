@@ -22,17 +22,21 @@ struct Cli {
     #[arg(long, default_value = "http://localhost:3001")]
     server: String,
 
-    /// Challenge ID (e.g. ramsey:3:3:v1)
+    /// Ramsey parameter k (clique size)
     #[arg(long)]
-    challenge: String,
+    k: u32,
 
-    /// Search strategy: greedy, local, annealing, or all
+    /// Ramsey parameter ell (independent set size)
+    #[arg(long)]
+    ell: u32,
+
+    /// Target vertex count n
+    #[arg(long)]
+    n: u32,
+
+    /// Search strategy: greedy, local, annealing, tree, or all
     #[arg(long, default_value = "all")]
     strategy: String,
-
-    /// Starting vertex count (overrides server record)
-    #[arg(long)]
-    start_n: Option<u32>,
 
     /// Maximum iterations per search attempt
     #[arg(long, default_value = "100000")]
@@ -88,7 +92,9 @@ async fn main() -> Result<()> {
 
     info!(
         server = %cli.server,
-        challenge = %cli.challenge,
+        k = cli.k,
+        ell = cli.ell,
+        n = cli.n,
         strategy = %cli.strategy,
         "starting ramseynet search worker"
     );
@@ -139,13 +145,10 @@ async fn main() -> Result<()> {
         other => anyhow::bail!("unknown strategy: {other} (use greedy, local, annealing, tree, or all)"),
     };
 
-    if cli.offline && cli.start_n.is_none() {
-        anyhow::bail!("--offline requires --start-n to set the target vertex count");
-    }
-
     let config = WorkerConfig {
-        challenge_id: cli.challenge,
-        start_n: cli.start_n,
+        k: cli.k,
+        ell: cli.ell,
+        n: cli.n,
         max_iters: cli.max_iters,
         no_backoff: cli.no_backoff,
         offline: cli.offline,

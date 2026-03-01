@@ -7,41 +7,43 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('version', '1');
-
-CREATE TABLE IF NOT EXISTS challenges (
-    challenge_id TEXT PRIMARY KEY,
-    k            INTEGER NOT NULL,
-    ell          INTEGER NOT NULL,
-    description  TEXT NOT NULL DEFAULT '',
-    created_at   TEXT NOT NULL,
-    CHECK (k >= 2 AND ell >= 2)
-);
+INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('version', '2');
 
 CREATE TABLE IF NOT EXISTS graph_submissions (
     graph_cid    TEXT PRIMARY KEY,
-    challenge_id TEXT NOT NULL REFERENCES challenges(challenge_id),
+    k            INTEGER NOT NULL,
+    ell          INTEGER NOT NULL,
     n            INTEGER NOT NULL,
     rgxf_json    TEXT NOT NULL,
     submitted_at TEXT NOT NULL,
-    CHECK (n >= 0)
+    CHECK (k >= 2 AND ell >= 2 AND k <= ell AND n >= 1)
 );
 
 CREATE TABLE IF NOT EXISTS verify_receipts (
     receipt_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     graph_cid    TEXT NOT NULL UNIQUE REFERENCES graph_submissions(graph_cid),
-    challenge_id TEXT NOT NULL REFERENCES challenges(challenge_id),
+    k            INTEGER NOT NULL,
+    ell          INTEGER NOT NULL,
     verdict      TEXT NOT NULL,
     reason       TEXT,
     witness_json TEXT,
     verified_at  TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS records (
-    challenge_id TEXT PRIMARY KEY REFERENCES challenges(challenge_id),
-    best_n       INTEGER NOT NULL,
-    best_cid     TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS leaderboard (
+    k            INTEGER NOT NULL,
+    ell          INTEGER NOT NULL,
+    n            INTEGER NOT NULL,
+    graph_cid    TEXT NOT NULL REFERENCES graph_submissions(graph_cid),
+    rank         INTEGER NOT NULL,
+    tier1_max    INTEGER NOT NULL,
+    tier1_min    INTEGER NOT NULL,
+    tier2_aut    REAL NOT NULL,
+    tier3_cid    TEXT NOT NULL,
+    score_json   TEXT NOT NULL,
+    admitted_at  TEXT NOT NULL,
+    PRIMARY KEY (k, ell, n, graph_cid),
+    CHECK (k <= ell AND rank >= 1 AND rank <= 100)
 );
 
 CREATE TABLE IF NOT EXISTS events (

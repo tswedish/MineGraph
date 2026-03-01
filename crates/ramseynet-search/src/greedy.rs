@@ -5,7 +5,7 @@ use ramseynet_graph::{compute_cid, AdjacencyMatrix};
 use ramseynet_verifier::verify_ramsey;
 
 use crate::search::{SearchResult, Searcher};
-use crate::viz::SearchObserver;
+use crate::viz::{ProgressInfo, SearchObserver};
 
 /// Greedy construction: start from a random edge density, shuffle candidate edges,
 /// greedily toggle each edge to maintain validity.
@@ -29,10 +29,11 @@ impl Searcher for GreedySearcher {
             let result = greedy_once(n, k, ell, rng);
             total_iters += 1;
 
-            observer.on_progress(
-                &result.graph, n, k, ell, "greedy",
-                total_iters, max_iters, result.valid, 0,
-            );
+            observer.on_progress(&ProgressInfo {
+                graph: &result.graph, n, k, ell, strategy: "greedy",
+                iteration: total_iters, max_iters, valid: result.valid,
+                violation_score: 0, k_cliques: None, ell_indsets: None,
+            });
 
             if result.valid {
                 return SearchResult {

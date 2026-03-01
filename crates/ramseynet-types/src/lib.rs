@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: &str = "0.1.0";
 
 /// SHA-256 content identifier for a graph artifact.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct GraphCid(pub [u8; 32]);
 
 impl GraphCid {
@@ -27,28 +27,22 @@ impl std::fmt::Display for GraphCid {
     }
 }
 
-/// Identifier for a Ramsey challenge arena.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ChallengeId(pub String);
-
-impl ChallengeId {
-    /// Create a canonical challenge ID for the given Ramsey parameters.
-    pub fn new(k: u32, ell: u32) -> Self {
-        Self(format!("ramsey:{k}:{ell}:v1"))
-    }
-}
-
-impl std::fmt::Display for ChallengeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 /// Ramsey parameters (k, ell): find graphs with no k-clique and no ell-independent-set.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RamseyParams {
     pub k: u32,
     pub ell: u32,
+}
+
+impl RamseyParams {
+    /// Create canonical parameters with k <= ell (since R(k,l) = R(l,k)).
+    pub fn canonical(k: u32, ell: u32) -> Self {
+        if k <= ell {
+            Self { k, ell }
+        } else {
+            Self { k: ell, ell: k }
+        }
+    }
 }
 
 /// Verification verdict.
@@ -73,17 +67,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn challenge_id_format() {
-        let id = ChallengeId::new(3, 3);
-        assert_eq!(id.0, "ramsey:3:3:v1");
-    }
-
-    #[test]
     fn graph_cid_hex_roundtrip() {
         let cid = GraphCid([0xab; 32]);
         let hex = cid.to_hex();
         let recovered = GraphCid::from_hex(&hex).unwrap();
         assert_eq!(cid, recovered);
+    }
+
+    #[test]
+    fn graph_cid_ord() {
+        let a = GraphCid([0x00; 32]);
+        let b = GraphCid([0xff; 32]);
+        assert!(a < b);
+    }
+
+    #[test]
+    fn ramsey_params_canonical() {
+        let p = RamseyParams::canonical(4, 3);
+        assert_eq!(p.k, 3);
+        assert_eq!(p.ell, 4);
+
+        let p2 = RamseyParams::canonical(3, 4);
+        assert_eq!(p2.k, 3);
+        assert_eq!(p2.ell, 4);
     }
 
     #[test]

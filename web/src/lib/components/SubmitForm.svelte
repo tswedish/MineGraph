@@ -1,25 +1,18 @@
 <script lang="ts">
-	import { getChallenges, submitGraph, type Challenge, type RgxfJson, type SubmitResponse } from '$lib/api';
+	import { submitGraph, type RgxfJson, type SubmitResponse } from '$lib/api';
 	import MatrixView from './MatrixView.svelte';
 
-	let { challengeId = '' }: { challengeId?: string } = $props();
+	let { k: initK = 3, ell: initEll = 3 }: { k?: number; ell?: number } = $props();
 
-	let challenges = $state<Challenge[]>([]);
-	let selectedChallenge = $state('');
+	let k = $state(initK);
+	let ell = $state(initEll);
+	let n = $state(0);
 	let rgxfInput = $state('');
 	let parsedRgxf = $state<RgxfJson | null>(null);
 	let parseError = $state('');
 	let submitting = $state(false);
 	let result = $state<SubmitResponse | null>(null);
 	let submitError = $state('');
-
-	$effect(() => {
-		getChallenges().then((c) => (challenges = c)).catch(() => {});
-	});
-
-	$effect(() => {
-		if (challengeId) selectedChallenge = challengeId;
-	});
 
 	$effect(() => {
 		parseError = '';
@@ -33,22 +26,21 @@
 				return;
 			}
 			parsedRgxf = obj as RgxfJson;
+			// Auto-fill n from RGXF
+			n = obj.n;
 		} catch (e) {
 			parseError = 'Invalid JSON';
 		}
 	});
 
 	async function handleSubmit() {
-		if (!selectedChallenge || !parsedRgxf) return;
+		if (!k || !ell || !n || !parsedRgxf) return;
 		submitting = true;
 		result = null;
 		submitError = '';
 
 		try {
-			result = await submitGraph({
-				challenge_id: selectedChallenge,
-				graph: parsedRgxf
-			});
+			result = await submitGraph({ k, ell, n, graph: parsedRgxf });
 		} catch (e) {
 			submitError = e instanceof Error ? e.message : 'Submission failed';
 		} finally {
@@ -58,16 +50,19 @@
 </script>
 
 <div class="submit-form">
-	<div class="field">
-		<label for="challenge-select">Challenge</label>
-		<select id="challenge-select" bind:value={selectedChallenge}>
-			<option value="">Select a challenge...</option>
-			{#each challenges as c}
-				<option value={c.challenge_id}>
-					{c.challenge_id} — R({c.k},{c.ell})
-				</option>
-			{/each}
-		</select>
+	<div class="params-row">
+		<div class="field">
+			<label for="k-input">K</label>
+			<input id="k-input" type="number" min="2" bind:value={k} />
+		</div>
+		<div class="field">
+			<label for="ell-input">L</label>
+			<input id="ell-input" type="number" min="2" bind:value={ell} />
+		</div>
+		<div class="field">
+			<label for="n-input">N</label>
+			<input id="n-input" type="number" min="1" bind:value={n} />
+		</div>
 	</div>
 
 	<div class="field">
@@ -93,7 +88,7 @@
 	<button
 		class="submit-btn"
 		onclick={handleSubmit}
-		disabled={!selectedChallenge || !parsedRgxf || submitting}
+		disabled={!k || !ell || !n || !parsedRgxf || submitting}
 	>
 		{submitting ? 'Submitting...' : 'Submit Graph'}
 	</button>
@@ -102,7 +97,7 @@
 		<div class="result" class:accepted={result.verdict === 'accepted'} class:rejected={result.verdict === 'rejected'}>
 			<div class="verdict-badge">{result.verdict}</div>
 			{#if result.reason}<p class="reason">{result.reason}</p>{/if}
-			{#if result.is_new_record}<p class="new-record">New record!</p>{/if}
+			{#if result.admitted}<p class="new-record">Admitted to leaderboard! Rank #{result.rank}</p>{/if}
 			<p class="cid">CID: {result.graph_cid}</p>
 			{#if result.witness && result.witness.length > 0}
 				<p class="witness-info">Witness: [{result.witness.join(', ')}]</p>
@@ -123,6 +118,15 @@
 		gap: 1.25rem;
 	}
 
+	.params-row {
+		display: flex;
+		gap: 1rem;
+	}
+
+	.params-row .field {
+		flex: 1;
+	}
+
 	.field {
 		display: flex;
 		flex-direction: column;
@@ -136,7 +140,7 @@
 		color: var(--color-text-muted);
 	}
 
-	select, textarea {
+	input, textarea {
 		background: var(--color-bg);
 		border: 1px solid var(--color-border);
 		border-radius: 0.5rem;
@@ -146,9 +150,13 @@
 		padding: 0.625rem 0.75rem;
 	}
 
-	select:focus, textarea:focus {
+	input:focus, textarea:focus {
 		outline: none;
 		border-color: var(--color-accent);
+	}
+
+	input[type="number"] {
+		width: 100%;
 	}
 
 	textarea {

@@ -35,19 +35,14 @@
 
 <div class="grid">
 	<div class="card">
-		<h2>Challenges</h2>
-		<p>Browse active Ramsey challenges and their best-known bounds.</p>
-		<a href="/challenges">View challenges</a>
+		<h2>Leaderboards</h2>
+		<p>Browse ranked Ramsey graph discoveries across all (K,L,n) triples.</p>
+		<a href="/leaderboards">View leaderboards</a>
 	</div>
 	<div class="card">
 		<h2>Submit</h2>
-		<p>Submit a candidate graph for verification against a challenge.</p>
+		<p>Submit a candidate graph for verification and leaderboard ranking.</p>
 		<a href="/submit">Submit graph</a>
-	</div>
-	<div class="card">
-		<h2>Records</h2>
-		<p>Track the evolving frontier of best-known Ramsey numbers.</p>
-		<a href="/records">View records</a>
 	</div>
 </div>
 

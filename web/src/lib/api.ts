@@ -29,23 +29,49 @@ export interface VerifyResponse {
 	witness?: number[];
 }
 
-export interface Challenge {
-	challenge_id: string;
+export interface LeaderboardSummary {
 	k: number;
 	ell: number;
-	description: string;
-	created_at: string;
+	n: number;
+	entry_count: number;
+	top_cid: string | null;
+	last_updated: string | null;
 }
 
-export interface Record {
-	challenge_id: string;
-	best_n: number;
-	best_cid: string;
-	updated_at: string;
+export interface LeaderboardEntry {
+	k: number;
+	ell: number;
+	n: number;
+	graph_cid: string;
+	rank: number;
+	tier1_max: number;
+	tier1_min: number;
+	tier2_aut: number;
+	score_json: string;
+	admitted_at: string;
+}
+
+export interface LeaderboardDetail {
+	k: number;
+	ell: number;
+	n: number;
+	entries: LeaderboardEntry[];
+	top_graph: RgxfJson | null;
+}
+
+export interface ThresholdInfo {
+	entry_count: number;
+	capacity: number;
+	worst_tier1_max: number | null;
+	worst_tier1_min: number | null;
+	worst_tier2_aut: number | null;
+	worst_tier3_cid: string | null;
 }
 
 export interface SubmitRequest {
-	challenge_id: string;
+	k: number;
+	ell: number;
+	n: number;
 	graph: RgxfJson;
 }
 
@@ -54,12 +80,15 @@ export interface SubmitResponse {
 	verdict: 'accepted' | 'rejected';
 	reason?: string;
 	witness?: number[];
-	is_new_record: boolean;
+	admitted: boolean;
+	rank: number | null;
+	score: Record<string, unknown> | null;
 }
 
 export interface SubmissionDetail {
 	graph_cid: string;
-	challenge_id: string;
+	k: number;
+	ell: number;
 	n: number;
 	rgxf: RgxfJson | null;
 	submitted_at: string;
@@ -67,8 +96,8 @@ export interface SubmissionDetail {
 	reason: string | null;
 	witness: number[] | null;
 	verified_at: string | null;
-	challenge: Challenge | null;
-	is_record: boolean;
+	leaderboard_rank: number | null;
+	score: Record<string, unknown> | null;
 }
 
 export interface EventMessage {
@@ -85,34 +114,17 @@ export async function getHealth(): Promise<HealthResponse> {
 	return res.json();
 }
 
-export async function getChallenges(): Promise<Challenge[]> {
-	const res = await fetch(`${BASE}/challenges`);
+export async function getLeaderboards(): Promise<LeaderboardSummary[]> {
+	const res = await fetch(`${BASE}/leaderboards`);
 	const data = await res.json();
-	return data.challenges;
+	return data.leaderboards;
 }
 
-export async function createChallenge(
+export async function getNValuesForPair(
 	k: number,
-	ell: number,
-	description: string
-): Promise<Challenge> {
-	const res = await fetch(`${BASE}/challenges`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ k, ell, description })
-	});
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || `HTTP ${res.status}`);
-	}
-	const data = await res.json();
-	return data.challenge;
-}
-
-export async function getChallenge(
-	id: string
-): Promise<{ challenge: Challenge; record: Record | null }> {
-	const res = await fetch(`${BASE}/challenges/${encodeURIComponent(id)}`);
+	ell: number
+): Promise<{ k: number; ell: number; n_values: number[] }> {
+	const res = await fetch(`${BASE}/leaderboards/${k}/${ell}`);
 	if (!res.ok) {
 		const err = await res.json();
 		throw new Error(err.error || `HTTP ${res.status}`);
@@ -120,10 +132,30 @@ export async function getChallenge(
 	return res.json();
 }
 
-export async function getRecords(): Promise<Record[]> {
-	const res = await fetch(`${BASE}/records`);
-	const data = await res.json();
-	return data.records;
+export async function getLeaderboard(
+	k: number,
+	ell: number,
+	n: number
+): Promise<LeaderboardDetail> {
+	const res = await fetch(`${BASE}/leaderboards/${k}/${ell}/${n}`);
+	if (!res.ok) {
+		const err = await res.json();
+		throw new Error(err.error || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function getThreshold(
+	k: number,
+	ell: number,
+	n: number
+): Promise<ThresholdInfo> {
+	const res = await fetch(`${BASE}/leaderboards/${k}/${ell}/${n}/threshold`);
+	if (!res.ok) {
+		const err = await res.json();
+		throw new Error(err.error || `HTTP ${res.status}`);
+	}
+	return res.json();
 }
 
 export async function submitVerify(req: VerifyRequest): Promise<VerifyResponse> {

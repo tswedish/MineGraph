@@ -6,7 +6,7 @@ use ramseynet_verifier::verify_ramsey;
 
 use crate::init::{init_graph, InitStrategy};
 use crate::search::{SearchResult, Searcher};
-use crate::viz::SearchObserver;
+use crate::viz::{ProgressInfo, SearchObserver};
 
 /// Simulated annealing: random edge flips with a cooling schedule.
 /// Accepts worsening moves with probability exp(-delta/temp).
@@ -117,10 +117,12 @@ impl Searcher for AnnealingSearcher {
 
         for iter in 0..max_iters {
             if iter % 100 == 0 {
-                observer.on_progress(
-                    &graph, n, k, ell, "annealing",
-                    iter, max_iters, false, current_score,
-                );
+                observer.on_progress(&ProgressInfo {
+                    graph: &graph, n, k, ell, strategy: "annealing",
+                    iteration: iter, max_iters, valid: false,
+                    violation_score: current_score,
+                    k_cliques: None, ell_indsets: None,
+                });
             }
 
             // Restart if frozen and stagnated
@@ -128,7 +130,11 @@ impl Searcher for AnnealingSearcher {
                 graph = init_graph(n, &self.init_strategy, rng);
                 current_score = violation_score(&graph, k, ell);
                 if current_score == 0 {
-                    observer.on_progress(&graph, n, k, ell, "annealing", iter + 1, max_iters, true, 0);
+                    observer.on_progress(&ProgressInfo {
+                        graph: &graph, n, k, ell, strategy: "annealing",
+                        iteration: iter + 1, max_iters, valid: true,
+                        violation_score: 0, k_cliques: None, ell_indsets: None,
+                    });
                     return SearchResult {
                         graph,
                         valid: true,
@@ -153,10 +159,11 @@ impl Searcher for AnnealingSearcher {
             let new_score = violation_score(&graph, k, ell);
 
             if new_score == 0 {
-                observer.on_progress(
-                    &graph, n, k, ell, "annealing",
-                    iter + 1, max_iters, true, 0,
-                );
+                observer.on_progress(&ProgressInfo {
+                    graph: &graph, n, k, ell, strategy: "annealing",
+                    iteration: iter + 1, max_iters, valid: true,
+                    violation_score: 0, k_cliques: None, ell_indsets: None,
+                });
                 return SearchResult {
                     graph,
                     valid: true,

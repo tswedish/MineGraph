@@ -31,12 +31,6 @@
 
 		return () => { cancelled = true; };
 	});
-
-	const challengeLabel = $derived(
-		detail?.challenge
-			? `R(${detail.challenge.k},${detail.challenge.ell})`
-			: detail?.challenge_id ?? ''
-	);
 </script>
 
 <svelte:head>
@@ -55,9 +49,9 @@
 
 		<div class="meta">
 			<div class="meta-row">
-				<span class="meta-label">Challenge</span>
-				<a href="/challenges/{encodeURIComponent(detail.challenge_id)}" class="meta-link">
-					{detail.challenge_id} — {challengeLabel}
+				<span class="meta-label">Ramsey Params</span>
+				<a href="/leaderboards/{detail.k}/{detail.ell}/{detail.n}" class="meta-link">
+					R({detail.k},{detail.ell}) n={detail.n}
 				</a>
 			</div>
 			<div class="meta-row">
@@ -69,8 +63,8 @@
 				<span class="verdict-badge" class:accepted={detail.verdict === 'accepted'} class:rejected={detail.verdict === 'rejected'}>
 					{detail.verdict ?? 'pending'}
 				</span>
-				{#if detail.is_record}
-					<span class="record-badge">Current Record</span>
+				{#if detail.leaderboard_rank}
+					<span class="rank-badge">Rank #{detail.leaderboard_rank}</span>
 				{/if}
 			</div>
 			{#if detail.reason}
@@ -205,7 +199,7 @@
 		background: color-mix(in srgb, var(--color-accepted) 15%, transparent);
 	}
 
-	.record-badge {
+	.rank-badge {
 		font-family: var(--font-mono);
 		font-size: 0.75rem;
 		font-weight: 700;

@@ -11,7 +11,9 @@ use axum::{
     Json, Router,
 };
 use ramseynet_graph::{compute_cid, rgxf, RgxfJson};
-use ramseynet_ledger::{Event, Ledger, LedgerError};
+use ramseynet_ledger::{AdmitScore, Event, Ledger, LedgerError};
+use ramseynet_types::RamseyParams;
+use ramseynet_verifier::scoring::compute_score;
 use ramseynet_verifier::{verify_ramsey, VerifyRequest, VerifyResponse};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -46,15 +48,13 @@ type ApiError = (StatusCode, Json<Value>);
 
 fn map_ledger_error(e: LedgerError) -> ApiError {
     match &e {
-        LedgerError::ChallengeNotFound(_) => {
-            (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() })))
-        }
-        LedgerError::ChallengeAlreadyExists(_) => {
-            (StatusCode::CONFLICT, Json(json!({ "error": e.to_string() })))
-        }
         LedgerError::GraphNotFound(_) => {
             (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() })))
         }
+        LedgerError::BelowThreshold(_, _, _) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": e.to_string() })),
+        ),
         _ => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
@@ -72,75 +72,52 @@ async fn health() -> Json<Value> {
     }))
 }
 
-async fn list_challenges(
+// ── Leaderboard routes ──────────────────────────────────────────────
+
+/// GET /api/leaderboards — list all (k, ell, n) leaderboards.
+async fn list_leaderboards(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, ApiError> {
     let ledger = state.ledger.clone();
-    let challenges = tokio::task::spawn_blocking(move || ledger.list_challenges())
+    let summaries = tokio::task::spawn_blocking(move || ledger.list_leaderboards())
         .await
         .unwrap()
         .map_err(map_ledger_error)?;
-    Ok(Json(json!({ "challenges": challenges })))
+    Ok(Json(json!({ "leaderboards": summaries })))
 }
 
-#[derive(Deserialize)]
-struct CreateChallengeRequest {
-    k: u32,
-    ell: u32,
-    #[serde(default)]
-    description: String,
-}
-
-async fn create_challenge(
+/// GET /api/leaderboards/:k/:l — list available n values for a (k, ell) pair.
+async fn list_n_for_pair(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<CreateChallengeRequest>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let ledger = state.ledger.clone();
-    let k = req.k;
-    let ell = req.ell;
-    let desc = req.description.clone();
-    let challenge = tokio::task::spawn_blocking(move || ledger.create_challenge(k, ell, &desc))
-        .await
-        .unwrap()
-        .map_err(map_ledger_error)?;
-
-    // Emit event
-    let _ = state.emit_event(
-        "challenge.created",
-        json!({
-            "challenge_id": challenge.challenge_id,
-            "k": challenge.k,
-            "ell": challenge.ell,
-            "description": challenge.description,
-        }),
-    );
-
-    Ok((StatusCode::CREATED, Json(json!({ "challenge": challenge }))))
-}
-
-async fn get_challenge(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
+    Path((k, ell)): Path<(u32, u32)>,
 ) -> Result<Json<Value>, ApiError> {
+    let params = RamseyParams::canonical(k, ell);
     let ledger = state.ledger.clone();
-    let id2 = id.clone();
-    let challenge = tokio::task::spawn_blocking(move || ledger.get_challenge(&id2))
+    let ns = tokio::task::spawn_blocking(move || ledger.list_n_for_pair(params.k, params.ell))
+        .await
+        .unwrap()
+        .map_err(map_ledger_error)?;
+    Ok(Json(json!({ "k": params.k, "ell": params.ell, "n_values": ns })))
+}
+
+/// GET /api/leaderboards/:k/:l/:n — full leaderboard for (k, ell, n).
+async fn get_leaderboard(
+    State(state): State<Arc<AppState>>,
+    Path((k, ell, n)): Path<(u32, u32, u32)>,
+) -> Result<Json<Value>, ApiError> {
+    let params = RamseyParams::canonical(k, ell);
+    let ledger = state.ledger.clone();
+    let (pk, pl, pn) = (params.k, params.ell, n);
+    let entries = tokio::task::spawn_blocking(move || ledger.get_leaderboard(pk, pl, pn))
         .await
         .unwrap()
         .map_err(map_ledger_error)?;
 
-    let ledger2 = state.ledger.clone();
-    let id3 = id.clone();
-    let record = tokio::task::spawn_blocking(move || ledger2.get_record(&id3))
-        .await
-        .unwrap()
-        .map_err(map_ledger_error)?;
-
-    // If there's a record, fetch the graph's RGXF JSON for visualization
-    let record_graph: Option<Value> = if let Some(ref r) = record {
-        let ledger3 = state.ledger.clone();
-        let best_cid = r.best_cid.clone();
-        let rgxf_str = tokio::task::spawn_blocking(move || ledger3.get_submission_rgxf(&best_cid))
+    // Fetch RGXF for the top entry if present
+    let top_graph: Option<Value> = if let Some(top) = entries.first() {
+        let ledger2 = state.ledger.clone();
+        let cid = top.graph_cid.clone();
+        let rgxf_str = tokio::task::spawn_blocking(move || ledger2.get_submission_rgxf(&cid))
             .await
             .unwrap()
             .map_err(map_ledger_error)?;
@@ -150,22 +127,30 @@ async fn get_challenge(
     };
 
     Ok(Json(json!({
-        "challenge": challenge,
-        "record": record,
-        "record_graph": record_graph,
+        "k": params.k,
+        "ell": params.ell,
+        "n": n,
+        "entries": entries,
+        "top_graph": top_graph,
     })))
 }
 
-async fn list_records(
+/// GET /api/leaderboards/:k/:l/:n/threshold — admission threshold.
+async fn get_threshold(
     State(state): State<Arc<AppState>>,
+    Path((k, ell, n)): Path<(u32, u32, u32)>,
 ) -> Result<Json<Value>, ApiError> {
+    let params = RamseyParams::canonical(k, ell);
     let ledger = state.ledger.clone();
-    let records = tokio::task::spawn_blocking(move || ledger.list_records())
+    let (pk, pl, pn) = (params.k, params.ell, n);
+    let info = tokio::task::spawn_blocking(move || ledger.get_threshold(pk, pl, pn))
         .await
         .unwrap()
         .map_err(map_ledger_error)?;
-    Ok(Json(json!({ "records": records })))
+    Ok(Json(json!(info)))
 }
+
+// ── Verify ──────────────────────────────────────────────────────────
 
 /// Stateless verification — no database interaction.
 async fn verify(
@@ -189,69 +174,53 @@ async fn verify(
     Ok(Json(response))
 }
 
+// ── Submit ──────────────────────────────────────────────────────────
+
 #[derive(Deserialize)]
 struct SubmitRequest {
-    challenge_id: String,
+    k: u32,
+    ell: u32,
+    n: u32,
     graph: RgxfJson,
 }
 
-/// Full lifecycle: verify + store + update records + emit events.
+/// Full lifecycle: verify + store + leaderboard admission + emit events.
 async fn submit_graph(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SubmitRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    // 1. Validate challenge exists
-    let ledger = state.ledger.clone();
-    let cid_str = req.challenge_id.clone();
-    tokio::task::spawn_blocking(move || ledger.get_challenge(&cid_str))
-        .await
-        .unwrap()
-        .map_err(map_ledger_error)?;
+    let params = RamseyParams::canonical(req.k, req.ell);
+    let k = params.k;
+    let ell = params.ell;
+    let n = req.n;
 
-    // 2. Decode RGXF and verify
+    // 1. Decode RGXF and validate graph size matches n
     let adj = rgxf::from_json(&req.graph).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": format!("Invalid RGXF: {e}") })),
         )
     })?;
-    let n = adj.n();
-    let cid = compute_cid(&adj);
-    let cid_hex = cid.to_hex();
 
-    // Parse k, ell from challenge_id (format: "ramsey:{k}:{ell}:v1")
-    let parts: Vec<&str> = req.challenge_id.split(':').collect();
-    let (k, ell) = if parts.len() >= 3 {
-        let k: u32 = parts[1].parse().map_err(|_| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "Invalid challenge_id format" })),
-            )
-        })?;
-        let ell: u32 = parts[2].parse().map_err(|_| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "Invalid challenge_id format" })),
-            )
-        })?;
-        (k, ell)
-    } else {
+    if adj.n() != n {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Invalid challenge_id format" })),
+            Json(json!({ "error": format!("n mismatch: graph has {} vertices but n={}", adj.n(), n) })),
         ));
-    };
+    }
 
+    // 2. Compute CID and verify
+    let cid = compute_cid(&adj);
+    let cid_hex = cid.to_hex();
     let result = verify_ramsey(&adj, k, ell, &cid);
 
     // 3. Store submission (handle duplicates gracefully)
     let rgxf_json_str = serde_json::to_string(&req.graph).unwrap();
     let ledger = state.ledger.clone();
-    let challenge_id = req.challenge_id.clone();
     let cid_hex2 = cid_hex.clone();
     let is_duplicate = {
         let result = tokio::task::spawn_blocking(move || {
-            ledger.store_submission(&challenge_id, &cid_hex2, n, &rgxf_json_str)
+            ledger.store_submission(k, ell, &cid_hex2, n, &rgxf_json_str)
         })
         .await
         .unwrap();
@@ -268,13 +237,14 @@ async fn submit_graph(
             "graph.submitted",
             json!({
                 "graph_cid": cid_hex,
-                "challenge_id": req.challenge_id,
+                "k": k,
+                "ell": ell,
                 "n": n,
             }),
         );
     }
 
-    // 4. Store verification receipt (skip if duplicate — already verified)
+    // 4. Store verification receipt (skip if duplicate)
     let verdict_str = result.verdict.to_string();
     let reason = result.reason.clone();
     let witness = result.witness.clone();
@@ -282,14 +252,14 @@ async fn submit_graph(
     if !is_duplicate {
         let ledger = state.ledger.clone();
         let cid_hex3 = cid_hex.clone();
-        let challenge_id2 = req.challenge_id.clone();
         let verdict2 = verdict_str.clone();
         let reason2 = reason.clone();
         let witness2 = witness.clone();
         tokio::task::spawn_blocking(move || {
             ledger.store_receipt(
                 &cid_hex3,
-                &challenge_id2,
+                k,
+                ell,
                 &verdict2,
                 reason2.as_deref(),
                 witness2.as_deref(),
@@ -304,7 +274,8 @@ async fn submit_graph(
             "graph.verified",
             json!({
                 "graph_cid": cid_hex,
-                "challenge_id": req.challenge_id,
+                "k": k,
+                "ell": ell,
                 "n": n,
                 "verdict": verdict_str,
                 "reason": reason,
@@ -313,26 +284,51 @@ async fn submit_graph(
         );
     }
 
-    // 5. Update record if accepted and better
-    let mut is_new_record = false;
+    // 5. If accepted, compute score and try to admit to leaderboard
+    let mut admitted = false;
+    let mut rank: Option<u32> = None;
+    let mut score_json: Option<Value> = None;
+
     if verdict_str == "accepted" && !is_duplicate {
+        // Score computation is CPU-intensive — run in blocking thread
+        let adj2 = adj.clone();
+        let cid2 = cid.clone();
+        let graph_score = tokio::task::spawn_blocking(move || {
+            compute_score(&adj2, &cid2)
+        })
+        .await
+        .unwrap();
+
+        let admit_score = AdmitScore {
+            tier1_max: graph_score.c_omega.max(graph_score.c_alpha),
+            tier1_min: graph_score.c_omega.min(graph_score.c_alpha),
+            tier2_aut: graph_score.aut_order,
+            tier3_cid: cid_hex.clone(),
+            score_json: serde_json::to_string(&graph_score).unwrap(),
+        };
+
         let ledger = state.ledger.clone();
-        let challenge_id3 = req.challenge_id.clone();
         let cid_hex4 = cid_hex.clone();
-        is_new_record = tokio::task::spawn_blocking(move || {
-            ledger.update_record_if_better(&challenge_id3, n, &cid_hex4)
+        let entry = tokio::task::spawn_blocking(move || {
+            ledger.try_admit(k, ell, n, &cid_hex4, &admit_score)
         })
         .await
         .unwrap()
         .map_err(map_ledger_error)?;
 
-        if is_new_record {
+        if let Some(entry) = entry {
+            admitted = true;
+            rank = Some(entry.rank);
+            score_json = serde_json::from_str(&entry.score_json).ok();
+
             let _ = state.emit_event(
-                "record.updated",
+                "leaderboard.admitted",
                 json!({
-                    "challenge_id": req.challenge_id,
-                    "best_n": n,
-                    "best_cid": cid_hex,
+                    "k": k,
+                    "ell": ell,
+                    "n": n,
+                    "graph_cid": cid_hex,
+                    "rank": entry.rank,
                 }),
             );
         }
@@ -351,10 +347,14 @@ async fn submit_graph(
             "verdict": verdict_str,
             "reason": reason,
             "witness": witness,
-            "is_new_record": is_new_record,
+            "admitted": admitted,
+            "rank": rank,
+            "score": score_json,
         })),
     ))
 }
+
+// ── Submission detail ───────────────────────────────────────────────
 
 /// Get full submission detail by CID.
 async fn get_submission(
@@ -367,7 +367,7 @@ async fn get_submission(
         .unwrap()
         .map_err(map_ledger_error)?;
 
-    let (submission, receipt, challenge) = detail.ok_or_else(|| {
+    let (submission, receipt, lb_entry) = detail.ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "Submission not found" })),
@@ -376,20 +376,10 @@ async fn get_submission(
 
     let rgxf: Option<Value> = serde_json::from_str(&submission.rgxf_json).ok();
 
-    // Check if this submission is the current record
-    let ledger2 = state.ledger.clone();
-    let challenge_id = submission.challenge_id.clone();
-    let record = tokio::task::spawn_blocking(move || ledger2.get_record(&challenge_id))
-        .await
-        .unwrap()
-        .map_err(map_ledger_error)?;
-    let is_record = record
-        .as_ref()
-        .is_some_and(|r| r.best_cid == submission.graph_cid);
-
     Ok(Json(json!({
         "graph_cid": submission.graph_cid,
-        "challenge_id": submission.challenge_id,
+        "k": submission.k,
+        "ell": submission.ell,
         "n": submission.n,
         "rgxf": rgxf,
         "submitted_at": submission.submitted_at,
@@ -397,10 +387,12 @@ async fn get_submission(
         "reason": receipt.as_ref().and_then(|r| r.reason.as_ref()),
         "witness": receipt.as_ref().and_then(|r| r.witness.as_ref()),
         "verified_at": receipt.as_ref().map(|r| &r.verified_at),
-        "challenge": challenge,
-        "is_record": is_record,
+        "leaderboard_rank": lb_entry.as_ref().map(|e| e.rank),
+        "score": lb_entry.as_ref().and_then(|e| serde_json::from_str::<Value>(&e.score_json).ok()),
     })))
 }
+
+// ── WebSocket ───────────────────────────────────────────────────────
 
 /// OESP-1 WebSocket event stream.
 async fn ws_events(
@@ -430,7 +422,6 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
     }
 
     // Subscribe before replay so no live events are missed during catch-up.
-    // The client deduplicates by seq, so overlap between replay and live is safe.
     let mut rx = state.event_tx.subscribe();
 
     // Replay missed events from DB
@@ -469,12 +460,13 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(health))
         .route("/api/health", get(health))
+        .route("/api/leaderboards", get(list_leaderboards))
+        .route("/api/leaderboards/{k}/{l}", get(list_n_for_pair))
+        .route("/api/leaderboards/{k}/{l}/{n}", get(get_leaderboard))
         .route(
-            "/api/challenges",
-            get(list_challenges).post(create_challenge),
+            "/api/leaderboards/{k}/{l}/{n}/threshold",
+            get(get_threshold),
         )
-        .route("/api/challenges/{id}", get(get_challenge))
-        .route("/api/records", get(list_records))
         .route("/api/submissions/{cid}", get(get_submission))
         .route("/api/verify", post(verify))
         .route("/api/submit", post(submit_graph))

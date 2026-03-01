@@ -50,11 +50,11 @@ In a third terminal:
 ./run seed
 ```
 
-This creates three challenges (R(3,3), R(3,4), R(4,4)) and submits four graphs:
-- **C5** → R(3,3) — accepted, record n=5
-- **Wagner graph** → R(3,4) — accepted, record n=8
-- **K5** → R(3,3) — rejected (clique_found, witness [0,1,2])
-- **E5 (empty)** → R(3,3) — rejected (independent_set_found, witness [0,1,2])
+This submits four graphs to the leaderboard system:
+- **C5** → R(3,3) n=5 — accepted, admitted to leaderboard
+- **Wagner graph** → R(3,4) n=8 — accepted, admitted to leaderboard
+- **K5** → R(3,3) n=5 — rejected (clique_found, witness [0,1,2])
+- **E5 (empty)** → R(3,3) n=5 — rejected (independent_set_found, witness [0,1,2])
 
 ### 2e. Server logs
 
@@ -72,89 +72,79 @@ Open **http://localhost:5173** in your browser.
 
 - [ ] RamseyNet title renders with purple gradient
 - [ ] Green status badge shows `RamseyNet v0.1.0 — ok`
-- [ ] Three navigation cards: Challenges, Submit, Records
+- [ ] Two navigation cards: Leaderboards, Submit
 - [ ] Live Events panel shows a green connection dot
-- [ ] Events from the seed script appear (challenge.created, graph.submitted, etc.)
+- [ ] Events from the seed script appear (graph.submitted, graph.verified, leaderboard.admitted)
 - [ ] Events with CIDs are clickable links to submission detail pages
 - [ ] No favicon 404 in the network tab (SVG K5 favicon loads)
 
-### 3.2 Challenges List (`/challenges`)
+### 3.2 Leaderboards (`/leaderboards`)
 
-Click **"View challenges"** or the **Challenges** nav link.
+Click **"Browse leaderboards"** or the **Leaderboards** nav link.
 
-- [ ] Three challenge cards: R(3,3), R(3,4), R(4,4)
-- [ ] R(3,3) shows `n = 5` in green
-- [ ] R(3,4) shows `n = 8` in green
-- [ ] R(4,4) shows `no submissions`
+- [ ] (K,L) pairs grouped: R(3,3), R(3,4), R(4,4)
+- [ ] Each pair shows available n values with entry counts
+- [ ] Click an n-value chip to navigate to the leaderboard detail
 
-### 3.3 Challenge Detail (`/challenges/ramsey:3:3:v1`)
+### 3.3 Leaderboard Detail (`/leaderboards/3/3/5`)
 
-Click the **R(3,3)** card.
+Click the **n=5** chip under R(3,3).
 
-- [ ] Back link navigates to challenge list
-- [ ] Header: `R(3,3)` with `ramsey:3:3:v1`
-- [ ] Current Record: Best n = 5, full CID (clickable → submission detail), timestamp
-- [ ] Matrix View: 5x5 adjacency matrix with C5 pattern
-- [ ] Circle Layout: Pentagon with cycle edges
-- [ ] Submit form pre-selected to `ramsey:3:3:v1`
+- [ ] Header: `R(3,3) n = 5` with entry count
+- [ ] Ranked table with columns: #, CID, C_max, C_min, |Aut|, Admitted
+- [ ] Top graph visualization: Matrix View + Circle Layout
+- [ ] Click a CID → navigates to submission detail
 
 ### 3.4 Submission Detail (`/submissions/[cid]`)
 
-Click the CID link on any challenge record, event feed entry, or records table row.
+Click a CID link on any leaderboard entry or event feed.
 
 - [ ] Back button navigates to previous page
 - [ ] Full CID displayed in monospace header
-- [ ] Challenge link → navigates to `/challenges/[id]` with R(k,l) label
+- [ ] R(k,l) link → navigates to `/leaderboards/[k]/[l]/[n]`
 - [ ] Graph size (n) displayed
 - [ ] Verdict badge: green ACCEPTED or red REJECTED
-- [ ] Amber "Current Record" badge shown next to verdict (when submission is the current record)
+- [ ] Rank badge shown when submission is on the leaderboard
 - [ ] Reason text (if rejected)
 - [ ] Witness vertices (if present)
 - [ ] Matrix View + Circle Layout side-by-side (with witness overlay for rejected graphs)
 - [ ] Submitted and Verified timestamps
 
-### 3.5 Records (`/records`)
-
-Click the **Records** nav link.
-
-- [ ] Table with Challenge, Best n, CID, Updated columns
-- [ ] CID column entries are clickable links to submission detail
-- [ ] Challenge column links to challenge detail
-
-### 3.6 Submit Page (`/submit`)
+### 3.5 Submit Page (`/submit`)
 
 Click the **Submit** nav link.
 
-- [ ] Challenge dropdown lists all three challenges
+- [ ] K, L, N number inputs
 - [ ] RGXF JSON textarea with placeholder
 
 #### Test A: Accepted graph
 
-1. Select **ramsey:4:4:v1**
+1. Enter K=4, L=4, N=5
 2. Paste: `{"n": 5, "encoding": "utri_b64_v1", "bits_b64": "mUA="}`
-3. Verify: Live matrix preview appears
+3. Verify: Live matrix preview appears (N auto-fills from RGXF)
 4. Click **Submit Graph**
-5. Verify: Green result with `ACCEPTED` and `New record!`
+5. Verify: Green result with `ACCEPTED` and admission to leaderboard
 
 #### Test B: Rejected graph
 
-1. Paste: `{"n": 4, "encoding": "utri_b64_v1", "bits_b64": "/A=="}`
-2. Click **Submit Graph**
-3. Verify: Red result with `REJECTED`, reason `clique_found`, witness `[0, 1, 2, 3]`
+1. Enter K=3, L=3, N=4
+2. Paste: `{"n": 4, "encoding": "utri_b64_v1", "bits_b64": "/A=="}`
+3. Click **Submit Graph**
+4. Verify: Red result with `REJECTED`, reason `clique_found`, witness `[0, 1, 2, 3]`
 
 #### Test C: Invalid input
 
 1. Type `not valid json` → "Invalid JSON" error, submit disabled
 2. Type `{"n": 5}` → "Missing required fields" error
 
-### 3.7 Navigation
+### 3.6 Navigation
 
 - [ ] RamseyNet logo → homepage
-- [ ] Challenges / Submit / Records nav links work
+- [ ] Leaderboards / Submit nav links work
 - [ ] Browser back/forward works (SPA routing)
-- [ ] Direct URL access works (e.g., `/challenges/ramsey:3:3:v1`)
+- [ ] Direct URL access works (e.g., `/leaderboards/3/3/5`)
 
-### 3.8 WebSocket Reconnect
+### 3.7 WebSocket Reconnect
 
 1. Stop the API server (Ctrl+C)
 2. Verify: Connection dot turns red
@@ -169,16 +159,19 @@ Click the **Submit** nav link.
 # Health check
 curl -s localhost:3001/api/health | jq .
 
-# List challenges
-curl -s localhost:3001/api/challenges | jq .
+# List all leaderboards
+curl -s localhost:3001/api/leaderboards | jq .
 
-# Challenge detail
-curl -s localhost:3001/api/challenges/ramsey:3:3:v1 | jq .
+# List n values for R(3,3)
+curl -s localhost:3001/api/leaderboards/3/3 | jq .
 
-# Records
-curl -s localhost:3001/api/records | jq .
+# Full leaderboard for R(3,3) n=5
+curl -s localhost:3001/api/leaderboards/3/3/5 | jq .
 
-# Submission detail (replace CID with a real one from records)
+# Admission threshold
+curl -s localhost:3001/api/leaderboards/3/3/5/threshold | jq .
+
+# Submission detail (replace CID with a real one from leaderboard)
 curl -s localhost:3001/api/submissions/<cid> | jq .
 
 # Stateless verification
@@ -189,7 +182,7 @@ curl -s -X POST localhost:3001/api/verify \
 # Submit a graph
 curl -s -X POST localhost:3001/api/submit \
   -H "Content-Type: application/json" \
-  -d '{"challenge_id":"ramsey:4:4:v1","graph":{"n":5,"encoding":"utri_b64_v1","bits_b64":"mUA="}}' | jq .
+  -d '{"k":4,"ell":4,"n":5,"graph":{"n":5,"encoding":"utri_b64_v1","bits_b64":"mUA="}}' | jq .
 
 # WebSocket event stream (requires wscat: npm install -g wscat)
 wscat -c ws://localhost:3001/api/events
@@ -235,52 +228,68 @@ Start the API server and seed data (sections 2b + 2d above).
 ### 7b. Basic run
 
 ```bash
-./run search --challenge ramsey:3:3:v1 --strategy greedy --max-iters 1000
+./run search --k 3 --ell 3 --n 5 --strategy greedy --max-iters 1000
 ```
 
-Expected: worker connects, finds valid graphs at n=2..5, submits each, then fails to find n=6 (since R(3,3)=6) and backs off. Press Ctrl+C to stop.
+Expected: worker connects, searches for valid R(3,3) graphs on n=5 vertices, submits competitive graphs to the leaderboard, and reports admission results. Press Ctrl+C to stop.
 
 ### 7c. Strategy-specific runs
 
 ```bash
 # Local search with tabu
-./run search --challenge ramsey:3:3:v1 --strategy local --max-iters 10000
+./run search --k 3 --ell 3 --n 5 --strategy local --max-iters 10000
 
 # Simulated annealing
-./run search --challenge ramsey:3:3:v1 --strategy annealing --max-iters 50000
+./run search --k 3 --ell 3 --n 5 --strategy annealing --max-iters 50000
+
+# Tree search (beam search)
+./run search --k 3 --ell 3 --n 5 --strategy tree
 
 # All strategies (default)
-./run search --challenge ramsey:3:3:v1
+./run search --k 3 --ell 3 --n 5
 ```
 
-### 7d. Starting from a specific n
+### 7d. Larger searches
 
 ```bash
-./run search --challenge ramsey:3:4:v1 --start-n 5 --strategy greedy
+# R(3,4) n=8 — Wagner graph is the classic solution
+./run search --k 3 --ell 4 --n 8 --strategy greedy
+
+# R(4,4) n=17 — Paley graph is the classic solution
+./run search --k 4 --ell 4 --n 17 --strategy all
 ```
 
-### 7e. Verify submissions appear in the UI
+### 7e. Offline mode
+
+```bash
+# No server needed — search with local viz only
+./run search --k 3 --ell 3 --n 5 --offline --viz-port 8080
+```
+
+Open http://localhost:8080 to see the search visualization dashboard.
+
+### 7f. Verify submissions appear in the UI
 
 After running the search worker:
-- [ ] `/challenges/ramsey:3:3:v1` shows updated record
-- [ ] `/records` table reflects new best_n values
-- [ ] Event feed on homepage shows `graph.submitted` events from the worker
+- [ ] `/leaderboards/3/3/5` shows new entries in the ranked table
+- [ ] Event feed on homepage shows `graph.submitted` and `leaderboard.admitted` events
 - [ ] Submission detail pages load correctly for worker-submitted graphs
+- [ ] Leaderboard list at `/leaderboards` reflects updated entry counts
 
-### 7f. Graceful shutdown
+### 7g. Graceful shutdown
 
-1. Start: `./run search --challenge ramsey:3:3:v1`
+1. Start: `./run search --k 3 --ell 3 --n 5`
 2. Press Ctrl+C
 3. Verify: Worker logs `Ctrl+C received, shutting down...` and exits cleanly
 
-### 7g. Error handling
+### 7h. Error handling
 
 ```bash
 # Server not running — should fail with connection error
-./run search --challenge ramsey:3:3:v1 --server http://localhost:9999
+./run search --k 3 --ell 3 --n 5 --server http://localhost:9999
 
-# Nonexistent challenge — should fail with "challenge not found"
-./run search --challenge ramsey:99:99:v1
+# K and L are required
+./run search --k 3 --n 5  # should fail with missing --ell
 ```
 
 ---
