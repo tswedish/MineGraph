@@ -39,24 +39,34 @@ function scheduleReconnect() {
 	if (reconnectTimer) return;
 	reconnectTimer = setTimeout(() => {
 		reconnectTimer = null;
-		connect();
+		doConnect();
 	}, reconnectDelay);
 	reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
 }
 
-export function connect() {
+function doConnect() {
 	if (ws) return;
-	const lastSeq = events.length > 0 ? events[0].seq : 0;
-	const socket = connectEvents();
-	ws = socket;
-	socket.onmessage = handleMessage;
-	socket.onopen = () => {
-		handleOpen();
-		// Send after_seq so the server replays only events we haven't seen
-		if (lastSeq > 0) socket.send(JSON.stringify({ after_seq: lastSeq }));
-	};
-	socket.onclose = handleClose;
-	socket.onerror = () => socket.close();
+	try {
+		const lastSeq = events.length > 0 ? events[0].seq : 0;
+		const socket = connectEvents();
+		ws = socket;
+		socket.onmessage = handleMessage;
+		socket.onopen = () => {
+			handleOpen();
+			// Send after_seq so the server replays only events we haven't seen
+			if (lastSeq > 0) socket.send(JSON.stringify({ after_seq: lastSeq }));
+		};
+		socket.onclose = handleClose;
+		socket.onerror = () => socket.close();
+	} catch {
+		// connectEvents can throw if window.location is unavailable (SSR)
+		ws = null;
+		scheduleReconnect();
+	}
+}
+
+export function connect() {
+	doConnect();
 }
 
 export function disconnect() {

@@ -24,8 +24,7 @@
 
 	function typeColor(event: EventMessage): string {
 		const t = event.event_type;
-		if (t === 'challenge.created') return 'var(--color-accent)';
-		if (t === 'record.updated') return '#f59e0b';
+		if (t === 'leaderboard.admitted') return '#f59e0b';
 		if (t === 'graph.verified') {
 			const p = parsePayload(event.payload);
 			return p.verdict === 'accepted' ? 'var(--color-accepted)' : 'var(--color-rejected)';
@@ -40,38 +39,43 @@
 			const p = parsePayload(event.payload);
 			return p.verdict === 'accepted' ? 'verified' : 'rejected';
 		}
-		if (t === 'challenge.created') return 'new challenge';
 		if (t === 'graph.submitted') return 'submitted';
-		if (t === 'record.updated') return 'new record';
+		if (t === 'leaderboard.admitted') return 'admitted';
 		return t;
 	}
 
 	function detail(event: EventMessage): string {
 		const p = parsePayload(event.payload);
-		const cid = p.challenge_id as string | undefined;
 		switch (event.event_type) {
-			case 'challenge.created':
-				return `${cid}  R(${p.k},${p.ell})`;
-			case 'graph.submitted':
-				return `${cid}  n=${p.n}`;
+			case 'graph.submitted': {
+				const parts: string[] = [];
+				if (p.k != null && p.ell != null) parts.push(`R(${p.k},${p.ell})`);
+				if (p.n != null) parts.push(`n=${p.n}`);
+				return parts.join('  ') || JSON.stringify(p).slice(0, 40);
+			}
 			case 'graph.verified': {
-				const parts: string[] = [cid ?? ''];
+				const parts: string[] = [];
+				if (p.k != null && p.ell != null) parts.push(`R(${p.k},${p.ell})`);
 				if (p.n != null) parts.push(`n=${p.n}`);
 				if (p.reason) parts.push(String(p.reason));
-				return parts.join('  ');
+				return parts.join('  ') || JSON.stringify(p).slice(0, 40);
 			}
-			case 'record.updated':
-				return `${cid}  n=${p.best_n}`;
+			case 'leaderboard.admitted': {
+				const parts: string[] = [];
+				if (p.k != null && p.ell != null) parts.push(`R(${p.k},${p.ell})`);
+				if (p.n != null) parts.push(`n=${p.n}`);
+				if (p.rank != null) parts.push(`rank #${p.rank}`);
+				return parts.join('  ') || JSON.stringify(p).slice(0, 40);
+			}
 			default: {
-				if (cid) return cid;
-				return JSON.stringify(p).slice(0, 40);
+				return JSON.stringify(p).slice(0, 50);
 			}
 		}
 	}
 
 	function getCid(event: EventMessage): string | null {
 		const p = parsePayload(event.payload);
-		return (p.graph_cid as string) ?? (p.best_cid as string) ?? null;
+		return (p.graph_cid as string) ?? null;
 	}
 
 	function timeAgo(iso: string): string {
@@ -92,10 +96,12 @@
 <div class="event-feed">
 	<div class="feed-header">
 		<span class="feed-title">Live Events</span>
-		<span class="connection-dot" class:online={connected}></span>
+		<span class="connection-indicator" class:online={connected} title={connected ? 'Connected' : 'Reconnecting...'}>
+			{connected ? 'live' : 'connecting'}
+		</span>
 	</div>
 	{#if events.length === 0}
-		<div class="empty">No events yet</div>
+		<div class="empty">{connected ? 'Waiting for events...' : 'Connecting...'}</div>
 	{:else}
 		<div class="events-list">
 			{#each events as event (event.seq)}
@@ -138,15 +144,18 @@
 		font-weight: 600;
 	}
 
-	.connection-dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		background: var(--color-rejected);
+	.connection-indicator {
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		padding: 0.125rem 0.5rem;
+		border-radius: 9999px;
+		color: var(--color-text-muted);
+		background: color-mix(in srgb, var(--color-text-muted) 15%, transparent);
 	}
 
-	.connection-dot.online {
-		background: var(--color-accepted);
+	.connection-indicator.online {
+		color: var(--color-accepted);
+		background: color-mix(in srgb, var(--color-accepted) 15%, transparent);
 	}
 
 	.empty {
@@ -182,7 +191,7 @@
 
 	.event-type {
 		font-weight: 600;
-		min-width: 8rem;
+		min-width: 6rem;
 	}
 
 	.detail {
