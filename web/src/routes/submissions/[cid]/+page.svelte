@@ -9,7 +9,7 @@
 	let error = $state('');
 
 	$effect(() => {
-		const cid = page.params.cid;
+		const cid = page.params.cid!;
 		loading = true;
 		error = '';
 		detail = null;

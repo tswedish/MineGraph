@@ -25,7 +25,9 @@ Other commands: `clippy`, `build`, `web` (production build).
 ./run search --k 4 --ell 4 --n 17 --offline --viz-port 8080  # no server needed
 ```
 
-Options: `--strategy {greedy|local|annealing|tree|all}`, `--init {perturbed-paley|paley|random|balanced}`, `--max-iters N`, `--tabu-tenure N`, `--initial-temp F`, `--cooling-rate F`, `--beam-width N`, `--max-depth N`, `--viz-port PORT`, `--offline`, `--no-backoff`.
+Options: `--strategy {greedy|local|annealing|tree|all}`, `--init {perturbed-paley|paley|random|balanced|leaderboard}`, `--noise-flips N`, `--max-iters N`, `--tabu-tenure N`, `--initial-temp F`, `--cooling-rate F`, `--beam-width N`, `--max-depth N`, `--viz-port PORT`, `--offline`, `--no-backoff`.
+
+**Discovery submission:** All valid graphs found during search (not just the final result) are collected in a bounded, score-sorted buffer (top 100) and submitted to the server. This is especially useful for tree/beam search which discovers many valid graphs per run.
 
 ## Architecture
 
@@ -72,7 +74,7 @@ K ≤ L canonical form enforced everywhere (R(K,L) = R(L,K)).
 |-------|---------|
 | `/` | Homepage with health badge, nav cards, live event feed |
 | `/leaderboards` | Browse by (K,L) pairs, drill into n values |
-| `/leaderboards/[k]/[l]/[n]` | Ranked table with score columns, top graph viz |
+| `/leaderboards/[k]/[l]/[n]` | Ranked table with score columns, top graph viz, auto-refresh via WebSocket |
 | `/submissions/[cid]` | Submission detail: verdict, witness, graph viz, rank |
 | `/submit` | Standalone graph submission form |
 
@@ -87,6 +89,7 @@ Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
 | `/api/leaderboards/{k}/{l}` | GET | List n values for a (K,L) pair |
 | `/api/leaderboards/{k}/{l}/{n}` | GET | Full leaderboard with entries + top graph |
 | `/api/leaderboards/{k}/{l}/{n}/threshold` | GET | Admission threshold (score-to-beat) |
+| `/api/leaderboards/{k}/{l}/{n}/graphs` | GET | RGXF for top leaderboard entries (`?limit=N`) |
 | `/api/submissions/{cid}` | GET | Submission detail: graph, receipt, rank |
 | `/api/verify` | POST | Stateless graph verification |
 | `/api/submit` | POST | Full lifecycle: verify + store + leaderboard admit |

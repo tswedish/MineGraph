@@ -1,13 +1,46 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { getLeaderboard, type LeaderboardDetail, type RgxfJson } from '$lib/api';
+	import { onDestroy } from 'svelte';
+	import { getLeaderboard, connectEvents, type LeaderboardDetail, type EventMessage } from '$lib/api';
 	import MatrixView from '$lib/components/MatrixView.svelte';
 	import CircleLayout from '$lib/components/CircleLayout.svelte';
 
 	let detail = $state<LeaderboardDetail | null>(null);
 	let loading = $state(true);
 	let error = $state('');
+	let flashCids = $state<Set<string>>(new Set());
 
+	// Track previous CIDs to detect new entries on refresh
+	let prevCids = new Set<string>();
+
+	function refresh(k: number, l: number, n: number) {
+		getLeaderboard(k, l, n)
+			.then((data) => {
+				// Detect new or rank-changed entries
+				const newFlash = new Set<string>();
+				for (const entry of data.entries) {
+					if (!prevCids.has(entry.graph_cid)) {
+						newFlash.add(entry.graph_cid);
+					}
+				}
+
+				prevCids = new Set(data.entries.map((e) => e.graph_cid));
+				detail = data;
+
+				if (newFlash.size > 0) {
+					flashCids = newFlash;
+					setTimeout(() => { flashCids = new Set(); }, 1500);
+				}
+			})
+			.catch((e) => {
+				error = e instanceof Error ? e.message : 'Failed to load leaderboard';
+			})
+			.finally(() => {
+				loading = false;
+			});
+	}
+
+	// Initial load + reload on param change
 	$effect(() => {
 		const k = Number(page.params.k);
 		const l = Number(page.params.l);
@@ -15,23 +48,59 @@
 		loading = true;
 		error = '';
 		detail = null;
+		prevCids = new Set();
+		flashCids = new Set();
 
-		let cancelled = false;
+		refresh(k, l, n);
+	});
 
-		getLeaderboard(k, l, n)
-			.then((data) => {
-				if (cancelled) return;
-				detail = data;
-			})
-			.catch((e) => {
-				if (cancelled) return;
-				error = e instanceof Error ? e.message : 'Failed to load leaderboard';
-			})
-			.finally(() => {
-				if (!cancelled) loading = false;
-			});
+	// WebSocket subscription for live updates
+	let ws: WebSocket | null = null;
 
-		return () => { cancelled = true; };
+	$effect(() => {
+		const k = Number(page.params.k);
+		const l = Number(page.params.l);
+		const n = Number(page.params.n);
+
+		// Clean up previous connection
+		if (ws) {
+			ws.onclose = null;
+			ws.close();
+			ws = null;
+		}
+
+		const socket = connectEvents();
+		ws = socket;
+
+		socket.onmessage = (ev: MessageEvent) => {
+			try {
+				const msg: EventMessage = JSON.parse(ev.data);
+				if (msg.event_type === 'leaderboard.admitted') {
+					const payload = JSON.parse(msg.payload);
+					// Only refresh if this event matches our leaderboard
+					if (payload.k === k && payload.ell === l && payload.n === n) {
+						refresh(k, l, n);
+					}
+				}
+			} catch {
+				// ignore malformed messages
+			}
+		};
+
+		socket.onerror = () => socket.close();
+
+		return () => {
+			socket.onclose = null;
+			socket.close();
+		};
+	});
+
+	onDestroy(() => {
+		if (ws) {
+			ws.onclose = null;
+			ws.close();
+			ws = null;
+		}
 	});
 </script>
 
@@ -75,7 +144,7 @@
 					</thead>
 					<tbody>
 						{#each detail.entries as entry (entry.graph_cid)}
-							<tr class:rank1={entry.rank === 1}>
+							<tr class:rank1={entry.rank === 1} class:flash={flashCids.has(entry.graph_cid)}>
 								<td class="rank">{entry.rank}</td>
 								<td class="cid">
 									<a href="/submissions/{entry.graph_cid}">{entry.graph_cid.slice(0, 16)}...</a>
@@ -83,7 +152,7 @@
 								<td class="score">{entry.tier1_max}</td>
 								<td class="score">{entry.tier1_min}</td>
 								<td class="score">{entry.tier2_aut}</td>
-								<td class="timestamp">{new Date(entry.admitted_at).toLocaleDateString()}</td>
+								<td class="timestamp">{new Date(entry.admitted_at).toLocaleString()}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -231,5 +300,16 @@
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: 0.75rem;
+	}
+
+	/* Flash animation for newly admitted entries */
+	@keyframes flash-row {
+		0% { background-color: transparent; }
+		20% { background-color: rgba(46, 204, 113, 0.25); }
+		100% { background-color: transparent; }
+	}
+
+	tr.flash {
+		animation: flash-row 1.5s ease-out;
 	}
 </style>
