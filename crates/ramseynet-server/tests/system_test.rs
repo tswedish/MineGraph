@@ -261,8 +261,9 @@ async fn system_test_full_lifecycle() {
         assert_eq!(resp.status(), 200, "duplicate should return 200");
         let body: Value = resp.json().await.unwrap();
         assert_eq!(body["verdict"], "accepted");
-        assert_eq!(body["admitted"], false, "duplicate cannot be newly admitted");
-        eprintln!("[PASS] 10. Duplicate C5 returns 200");
+        assert_eq!(body["admitted"], true, "duplicate already on leaderboard should report admitted");
+        assert_eq!(body["rank"], 1, "duplicate should report existing rank");
+        eprintln!("[PASS] 10. Duplicate C5 returns 200, reports existing rank");
     }
 
     // ── 11. Leaderboard has 1 entry ─────────────────────────────────

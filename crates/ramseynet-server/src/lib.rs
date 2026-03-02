@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
+use tracing::{info, warn};
 
 // ── Application state ────────────────────────────────────────────────
 
@@ -247,7 +248,20 @@ async fn submit_graph(
     // 2. Compute CID and verify
     let cid = compute_cid(&adj);
     let cid_hex = cid.to_hex();
+    info!(
+        graph_cid = %cid_hex,
+        k, ell, n,
+        edges = adj.num_edges(),
+        "received submission"
+    );
     let result = verify_ramsey(&adj, k, ell, &cid);
+
+    info!(
+        graph_cid = %cid_hex,
+        verdict = %result.verdict,
+        reason = ?result.reason,
+        "verified graph"
+    );
 
     // 3. Store submission (handle duplicates gracefully)
     let rgxf_json_str = serde_json::to_string(&req.graph).unwrap();
@@ -261,7 +275,10 @@ async fn submit_graph(
         .unwrap();
         match result {
             Ok(_) => false,
-            Err(LedgerError::GraphAlreadySubmitted(_)) => true,
+            Err(LedgerError::GraphAlreadySubmitted(_)) => {
+                info!(graph_cid = %cid_hex, "duplicate submission, skipping");
+                true
+            }
             Err(e) => return Err(map_ledger_error(e)),
         }
     };
@@ -324,7 +341,7 @@ async fn submit_graph(
     let mut rank: Option<u32> = None;
     let mut score_json: Option<Value> = None;
 
-    if verdict_str == "accepted" && !is_duplicate {
+    if verdict_str == "accepted" {
         // Score computation is CPU-intensive — run in blocking thread
         let adj2 = adj.clone();
         let cid2 = cid.clone();
@@ -356,6 +373,13 @@ async fn submit_graph(
             rank = Some(entry.rank);
             score_json = serde_json::from_str(&entry.score_json).ok();
 
+            info!(
+                graph_cid = %cid_hex,
+                k, ell, n,
+                rank = entry.rank,
+                "admitted to leaderboard"
+            );
+
             let _ = state.emit_event(
                 "leaderboard.admitted",
                 json!({
@@ -365,6 +389,12 @@ async fn submit_graph(
                     "graph_cid": cid_hex,
                     "rank": entry.rank,
                 }),
+            );
+        } else {
+            warn!(
+                graph_cid = %cid_hex,
+                k, ell, n,
+                "not admitted — below leaderboard threshold"
             );
         }
     }
