@@ -76,7 +76,9 @@
 			try {
 				const msg: EventMessage = JSON.parse(ev.data);
 				if (msg.event_type === 'leaderboard.admitted') {
-					const payload = JSON.parse(msg.payload);
+					const payload = typeof msg.payload === 'string'
+						? JSON.parse(msg.payload)
+						: msg.payload;
 					// Only refresh if this event matches our leaderboard
 					if (payload.k === k && payload.ell === l && payload.n === n) {
 						refresh(k, l, n);

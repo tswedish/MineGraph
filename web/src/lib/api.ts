@@ -103,7 +103,7 @@ export interface SubmissionDetail {
 export interface EventMessage {
 	seq: number;
 	event_type: string;
-	payload: string;
+	payload: string | Record<string, unknown>;
 	created_at: string;
 }
 
