@@ -145,6 +145,20 @@ export async function getLeaderboard(
 	return res.json();
 }
 
+export async function getLeaderboardGraphs(
+	k: number,
+	ell: number,
+	n: number,
+	limit: number = 100
+): Promise<RgxfJson[]> {
+	const res = await fetch(`${BASE}/leaderboards/${k}/${ell}/${n}/graphs?limit=${limit}`);
+	if (!res.ok) {
+		return []; // graceful fallback — thumbnails just won't render
+	}
+	const data = await res.json();
+	return data.graphs;
+}
+
 export async function getThreshold(
 	k: number,
 	ell: number,

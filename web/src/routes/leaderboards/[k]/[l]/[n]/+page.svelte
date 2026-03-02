@@ -1,17 +1,19 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onDestroy } from 'svelte';
-	import { getLeaderboard, connectEvents, type LeaderboardDetail, type EventMessage } from '$lib/api';
+	import { getLeaderboard, getLeaderboardGraphs, connectEvents, type LeaderboardDetail, type EventMessage, type RgxfJson } from '$lib/api';
 	import MatrixView from '$lib/components/MatrixView.svelte';
 	import CircleLayout from '$lib/components/CircleLayout.svelte';
+	import GraphThumb from '$lib/components/GraphThumb.svelte';
 
 	let detail = $state<LeaderboardDetail | null>(null);
 	let loading = $state(true);
 	let error = $state('');
 	let flashCids = $state<Set<string>>(new Set());
+	let graphs = $state<RgxfJson[]>([]);
 	let now = $state(Date.now());
 
-	// Tick every 5s so recency backgrounds update (fast for <1min bright green)
+	// Tick every 5s for relative timestamps
 	const tickInterval = setInterval(() => { now = Date.now(); }, 5_000);
 	onDestroy(() => clearInterval(tickInterval));
 
@@ -28,31 +30,59 @@
 		return new Date(admittedAt).toLocaleString();
 	}
 
-	/** Recency background: green → yellow → gray → transparent over 8 hours */
-	function recencyStyle(admittedAt: string): string {
-		const ageMs = now - new Date(admittedAt).getTime();
-		const MAX_MS = 8 * 60 * 60 * 1000; // 8 hours
-		if (ageMs >= MAX_MS || ageMs < 0) return '';
-		// Bright green for entries < 5 minutes old
-		const BRIGHT_MS = 5 * 60_000;
-		if (ageMs < BRIGHT_MS) {
-			const fade = ageMs / BRIGHT_MS; // 0 → 1 over 5 minutes
-			const alpha = 0.35 - 0.17 * fade; // 0.35 → 0.18
-			return `background-color: hsla(140, 80%, 50%, ${alpha.toFixed(3)})`;
+	/**
+	 * Distribution-based recency highlighting.
+	 * Computes percentile rank of each entry's age among all entries,
+	 * then maps top quantiles to green → yellow → transparent.
+	 * Intensity decays with absolute age of the newest entry (fades fully after 24h of inactivity).
+	 */
+	const recencyMap = $derived.by(() => {
+		const map = new Map<string, string>();
+		if (!detail || detail.entries.length < 2) return map;
+
+		const entries = detail.entries;
+		const ages = entries.map(e => ({
+			cid: e.graph_cid,
+			age: now - new Date(e.admitted_at).getTime()
+		}));
+
+		// Sort ascending by age (newest first)
+		const sorted = [...ages].sort((a, b) => a.age - b.age);
+		const n = sorted.length;
+
+		// Absolute freshness decay: if even the newest entry is old, fade everything
+		const newestAge = sorted[0].age;
+		const freshness = Math.max(0, 1 - newestAge / (24 * 3_600_000)); // → 0 over 24h
+		if (freshness < 0.02) return map;
+
+		// Assign percentile rank: 0 = newest, 1 = oldest
+		const rankOf = new Map<string, number>();
+		for (let i = 0; i < n; i++) {
+			rankOf.set(sorted[i].cid, i / (n - 1));
 		}
-		const t = ageMs / MAX_MS; // 0 = just now, 1 = 8h ago
-		// Hue: 140 (green) → 50 (yellow) → 40 (warm gray)
-		const hue = t < 0.4
-			? 140 - (140 - 50) * (t / 0.4)    // green → yellow
-			: 50 - (50 - 40) * ((t - 0.4) / 0.6); // yellow → warm gray
-		// Opacity: 0.18 → 0 (cubic fade for steeper dropoff)
-		const alpha = 0.18 * (1 - t) * (1 - t) * (1 - t);
-		return `background-color: hsla(${Math.round(hue)}, 70%, 55%, ${alpha.toFixed(3)})`;
-	}
+
+		for (const { cid } of ages) {
+			const t = rankOf.get(cid)!; // 0 = newest, 1 = oldest
+
+			// Intensity: cubic dropoff emphasizing top quantiles
+			const raw = (1 - t) * (1 - t) * (1 - t); // 1.0 → 0.0
+			const alpha = 0.35 * raw * freshness;
+			if (alpha < 0.008) continue;
+
+			// Hue: 140 (green) for top quantile → 55 (yellow) → 40 (warm) for bottom
+			const hue = 140 - t * 100;
+			map.set(cid, `background-color: hsla(${Math.round(hue)}, 75%, 50%, ${alpha.toFixed(3)})`);
+		}
+
+		return map;
+	});
 
 	function refresh(k: number, l: number, n: number) {
-		getLeaderboard(k, l, n)
-			.then((data) => {
+		Promise.all([
+			getLeaderboard(k, l, n),
+			getLeaderboardGraphs(k, l, n)
+		])
+			.then(([data, graphData]) => {
 				// Detect new or rank-changed entries
 				const newFlash = new Set<string>();
 				for (const entry of data.entries) {
@@ -63,6 +93,7 @@
 
 				prevCids = new Set(data.entries.map((e) => e.graph_cid));
 				detail = data;
+				graphs = graphData;
 
 				if (newFlash.size > 0) {
 					flashCids = newFlash;
@@ -87,6 +118,7 @@
 		detail = null;
 		prevCids = new Set();
 		flashCids = new Set();
+		graphs = [];
 
 		refresh(k, l, n);
 	});
@@ -174,6 +206,7 @@
 					<thead>
 						<tr>
 							<th>#</th>
+							<th>Graph</th>
 							<th>CID</th>
 							<th>C<sub>max</sub></th>
 							<th>C<sub>min</sub></th>
@@ -183,8 +216,15 @@
 					</thead>
 					<tbody>
 						{#each detail.entries as entry (entry.graph_cid)}
-							<tr class:rank1={entry.rank === 1} class:flash={flashCids.has(entry.graph_cid)} style={recencyStyle(entry.admitted_at)}>
+							<tr class:rank1={entry.rank === 1} class:flash={flashCids.has(entry.graph_cid)} style={recencyMap.get(entry.graph_cid) ?? ''}>
 								<td class="rank">{entry.rank}</td>
+								<td class="thumb">
+									{#if graphs[entry.rank - 1]}
+										<a href="/submissions/{entry.graph_cid}">
+											<GraphThumb rgxf={graphs[entry.rank - 1]} size={48} />
+										</a>
+									{/if}
+								</td>
 								<td class="cid">
 									<a href="/submissions/{entry.graph_cid}">{entry.graph_cid.slice(0, 16)}...</a>
 								</td>
@@ -305,6 +345,20 @@
 
 	tr.rank1 .rank {
 		color: var(--color-accepted);
+	}
+
+	.thumb {
+		width: 48px;
+		padding: 0.375rem 0.5rem;
+	}
+
+	.thumb a {
+		display: block;
+		line-height: 0;
+	}
+
+	.thumb a:hover {
+		opacity: 0.8;
 	}
 
 	.cid {
