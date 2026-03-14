@@ -172,9 +172,11 @@ impl VizHandle {
         is_record: bool,
         score: GraphScore,
     ) -> Option<LeaderboardEntry> {
-        let cid = compute_cid(graph);
+        // Use the CID embedded in the score (canonical CID from compute_score_canonical)
+        // rather than recomputing from the graph. This ensures the viz leaderboard
+        // deduplicates by canonical CID even if the passed graph isn't canonical.
         let entry = LeaderboardEntry {
-            cid: cid.to_hex(),
+            cid: score.cid.to_hex(),
             graph: rgxf::to_json(graph),
             n,
             strategy: strategy.to_string(),
@@ -408,10 +410,11 @@ impl DiscoveryCollector {
             return;
         }
 
-        // Mark as known globally so other collectors/future rounds skip it
-        if let Some(ref known) = self.known {
-            known.insert(discovery.cid.clone());
-        }
+        // NOTE: We intentionally do NOT add to `known` here. The known set
+        // tracks graphs that have been *submitted to the server*. Adding on
+        // push would cause submit_discoveries() to skip every graph (since
+        // it checks known.contains() before POSTing). The known set is
+        // populated after successful server submission instead.
 
         inner.cid_set.insert(discovery.cid.clone());
         inner.entries.insert(pos, discovery);
@@ -434,9 +437,18 @@ impl DiscoveryCollector {
 /// Observer that collects all valid discoveries and optionally forwards to a
 /// `VizObserver` for live dashboard display. Replaces the old pattern of
 /// choosing between `VizObserver` and `NoOpObserver`.
+///
+/// Valid graphs are canonicalized once and the canonical form is used for
+/// both the collector (server submission) and the viz leaderboard, ensuring
+/// consistent CID deduplication across both surfaces.
 pub struct CollectorObserver {
     pub collector: DiscoveryCollector,
+    /// VizObserver for progress snapshots (iteration updates).
     viz: Option<VizObserver>,
+    /// Direct handle to the viz leaderboard — used to submit canonical
+    /// graphs directly, bypassing VizObserver::on_valid_found (which
+    /// would receive the raw graph and compute a non-canonical CID).
+    viz_handle: Option<Arc<VizHandle>>,
     /// Known CIDs for seeding tree search `seen` sets.
     known: Option<KnownCids>,
     /// Cancellation flag — set by the worker on Ctrl+C / shutdown.
@@ -446,9 +458,11 @@ pub struct CollectorObserver {
 impl CollectorObserver {
     pub fn new(collector: DiscoveryCollector, viz: Option<VizObserver>) -> Self {
         let known = collector.known.clone();
+        let viz_handle = viz.as_ref().map(|v| Arc::clone(&v.handle));
         Self {
             collector,
             viz,
+            viz_handle,
             known,
             cancelled: Arc::new(AtomicBool::new(false)),
         }
@@ -461,7 +475,8 @@ impl CollectorObserver {
         cancelled: Arc<AtomicBool>,
     ) -> Self {
         let known = collector.known.clone();
-        Self { collector, viz, known, cancelled }
+        let viz_handle = viz.as_ref().map(|v| Arc::clone(&v.handle));
+        Self { collector, viz, viz_handle, known, cancelled }
     }
 
     /// Signal cancellation — search strategies will bail out early.
@@ -499,22 +514,28 @@ impl SearchObserver for CollectorObserver {
         &self,
         graph: &AdjacencyMatrix,
         n: u32,
-        k: u32,
-        ell: u32,
+        _k: u32,
+        _ell: u32,
         strategy: &str,
         iteration: u64,
     ) {
-        // Use canonical form for dedup and scoring — isomorphic graphs
-        // map to the same CID and are collected only once.
+        // Canonicalize once — used for both the collector (server submission)
+        // and the viz leaderboard, ensuring consistent CID dedup.
         let score_result = ramseynet_verifier::scoring::compute_score_canonical(graph);
         let canonical_cid = compute_cid(&score_result.canonical_graph);
         self.collector.push(Discovery {
-            graph: score_result.canonical_graph,
-            score: score_result.score,
+            graph: score_result.canonical_graph.clone(),
+            score: score_result.score.clone(),
             cid: canonical_cid,
         });
-        if let Some(ref viz) = self.viz {
-            viz.on_valid_found(graph, n, k, ell, strategy, iteration);
+        // Submit the CANONICAL graph to the viz leaderboard directly,
+        // bypassing VizObserver::on_valid_found which would use the raw graph.
+        if let Some(ref vh) = self.viz_handle {
+            vh.submit_discovery(
+                &score_result.canonical_graph,
+                n, strategy, iteration,
+                false, score_result.score,
+            );
         }
     }
 }
@@ -591,18 +612,6 @@ impl SearchObserver for VizObserver {
         self.handle.update_snapshot(snapshot);
     }
 
-    fn on_valid_found(
-        &self,
-        graph: &AdjacencyMatrix,
-        n: u32,
-        _k: u32,
-        _ell: u32,
-        strategy: &str,
-        iteration: u64,
-    ) {
-        let cid = compute_cid(graph);
-        let score = ramseynet_verifier::scoring::compute_score(graph, &cid);
-        self.handle
-            .submit_discovery(graph, n, strategy, iteration, false, score);
-    }
+    // on_valid_found: uses the default no-op. CollectorObserver handles
+    // valid graph submissions directly to VizHandle with canonical form.
 }

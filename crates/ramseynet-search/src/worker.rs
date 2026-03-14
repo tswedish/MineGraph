@@ -34,7 +34,6 @@ pub struct WorkerConfig {
 /// Drain the collector and submit discoveries to the server, skipping
 /// any whose canonical CID is already known (from prior rounds, server
 /// leaderboard, or earlier submissions in this batch).
-#[allow(clippy::too_many_arguments)]
 async fn submit_discoveries(
     client: &ServerClient,
     collector: &DiscoveryCollector,
@@ -42,12 +41,18 @@ async fn submit_discoveries(
     k: u32,
     ell: u32,
     n: u32,
-    viz_handle: &Option<Arc<VizHandle>>,
-    strategy: &str,
 ) -> (usize, usize) {
     let discoveries = collector.drain();
     if discoveries.is_empty() {
         return (0, 0);
+    }
+
+    // Immediately mark all drained CIDs as known, closing the race window
+    // where the search thread (still running in spawn_blocking) could
+    // re-discover and re-push the same canonical CID into the now-empty
+    // collector before the server responds.
+    for d in &discoveries {
+        known.insert(d.cid.clone());
     }
 
     let mut submitted = 0usize;
@@ -55,12 +60,6 @@ async fn submit_discoveries(
 
     for discovery in &discoveries {
         let cid_hex = discovery.cid.to_hex();
-
-        // Skip if already known (leaderboard, prior submission, or prior discovery)
-        if known.contains(&discovery.cid) {
-            continue;
-        }
-
         let rgxf_json = rgxf::to_json(&discovery.graph);
         match client.submit(k, ell, n, rgxf_json).await {
             Ok(resp) => {
@@ -72,19 +71,16 @@ async fn submit_discoveries(
                     rank = ?resp.rank,
                     "submitted graph"
                 );
-                // Mark as known so we never re-submit
+                // Also mark the server's returned CID (should match, but belt-and-suspenders)
                 known.insert_hex(&resp.graph_cid);
                 submitted += 1;
 
                 if was_admitted {
                     admitted += 1;
                     info!("admitted to leaderboard! rank={}", resp.rank.unwrap_or(0));
-                    if let Some(ref vh) = viz_handle {
-                        vh.submit_discovery(
-                            &discovery.graph, n, strategy, 0,
-                            true, discovery.score.clone(),
-                        );
-                    }
+                    // No redundant viz push here — the graph was already submitted
+                    // to the viz leaderboard during the search (via CollectorObserver)
+                    // with the canonical CID.
                 }
             }
             Err(e) => {
@@ -214,7 +210,6 @@ pub async fn run_worker(
 
             // While search is running, periodically drain and submit discoveries
             let submit_interval = Duration::from_secs(30);
-            let strategy_name = strategy.to_string();
             let mut last_submit = Instant::now();
             let mut shutting_down = false;
 
@@ -246,7 +241,7 @@ pub async fn run_worker(
 
                             if let Some(ref vh) = viz_handle {
                                 if let Some(entry) = vh.submit_discovery(
-                                    &result.graph, target_n, strategy, result.iterations,
+                                    &score_result.canonical_graph, target_n, strategy, result.iterations,
                                     false, score_result.score,
                                 ) {
                                     info!(
@@ -287,7 +282,7 @@ pub async fn run_worker(
                         // Final drain + submit any remaining discoveries
                         let (sub, adm) = submit_discoveries(
                             &client, &collector_for_submit, &known,
-                            k, ell, target_n, &viz_handle, &strategy_name,
+                            k, ell, target_n,
                         ).await;
                         if sub > 0 {
                             info!(submitted = sub, admitted = adm, "final submission batch");
@@ -320,7 +315,7 @@ pub async fn run_worker(
                         // Periodic drain + submit while search is still running
                         let (sub, adm) = submit_discoveries(
                             &client, &collector_for_submit, &known,
-                            k, ell, target_n, &viz_handle, &strategy_name,
+                            k, ell, target_n,
                         ).await;
                         if sub > 0 {
                             info!(submitted = sub, admitted = adm, "periodic submission batch");
@@ -427,9 +422,11 @@ async fn run_worker_offline(
             let _discoveries = collector.drain();
 
             if let Some(score) = score {
+                // Compute canonical form for consistent viz display
+                let (canonical_graph, _) = ramseynet_verifier::canonical_form(&result.graph);
                 if let Some(ref vh) = viz_handle {
                     if let Some(entry) = vh.submit_discovery(
-                        &result.graph, target_n, strategy, result.iterations,
+                        &canonical_graph, target_n, strategy, result.iterations,
                         false, score,
                     ) {
                         info!(
