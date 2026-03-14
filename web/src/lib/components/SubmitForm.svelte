@@ -1,11 +1,13 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { submitGraph, type RgxfJson, type SubmitResponse } from '$lib/api';
 	import MatrixView from './MatrixView.svelte';
 
-	let { k: initK = 3, ell: initEll = 3 }: { k?: number; ell?: number } = $props();
+	let props: { k?: number; ell?: number } = $props();
 
-	let k = $state(initK);
-	let ell = $state(initEll);
+	// Seed form state from props — intentionally captured once (not reactive).
+	let k = $state(untrack(() => props.k ?? 3));
+	let ell = $state(untrack(() => props.ell ?? 3));
 	let n = $state(0);
 	let rgxfInput = $state('');
 	let parsedRgxf = $state<RgxfJson | null>(null);

@@ -118,7 +118,7 @@
 	});
 </script>
 
-<canvas bind:this={canvas} class="matrix-canvas"></canvas>
+<canvas bind:this={canvas} class="matrix-canvas" aria-label="Adjacency matrix visualization"></canvas>
 
 <style>
 	.matrix-canvas {

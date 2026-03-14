@@ -45,3 +45,4 @@ logs/
 /package.json
 /package-lock.json
 /challenges-snap.yaml
+snap-*.yml

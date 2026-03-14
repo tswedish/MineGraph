@@ -88,8 +88,12 @@ case "$cmd" in
     echo "=== Seeding ledger ==="
     bash "$REPO/scripts/seed-ledger.sh" "$@"
     ;;
+  e2e)
+    echo "=== Running E2E tests ==="
+    bash "$REPO/scripts/e2e-test.sh" "$@"
+    ;;
   *)
-    echo "Usage: wsl-dev.sh {test|clippy|build|web|web-dev|ci|server|server-log|search|seed}"
+    echo "Usage: wsl-dev.sh {test|clippy|build|web|web-dev|ci|server|server-log|search|seed|e2e}"
     exit 1
     ;;
 esac
