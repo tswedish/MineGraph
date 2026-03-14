@@ -5,16 +5,71 @@ use std::time::{Duration, Instant};
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 use ramseynet_graph::{compute_cid, rgxf, AdjacencyMatrix};
-use ramseynet_verifier::scoring::compute_score_canonical;
+use ramseynet_types::GraphCid;
+use ramseynet_verifier::scoring::{compute_score_canonical, GraphScore};
 use tokio::sync::watch;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
-use crate::client::ServerClient;
+use crate::client::{ServerClient, ThresholdResponse};
 use crate::error::SearchError;
 use crate::search::Searcher;
 use crate::viz::{
     CollectorObserver, Discovery, DiscoveryCollector, KnownCids, VizHandle, VizObserver,
 };
+
+// ── Admission threshold ─────────────────────────────────────────────
+
+/// Cached admission threshold from the server. Used to pre-filter
+/// candidates before submitting — if a graph's score wouldn't beat
+/// the worst entry on a full leaderboard, don't waste an HTTP round-trip.
+struct AdmissionThreshold {
+    /// Reconstructed worst score for comparison. None if board isn't full
+    /// (meaning any valid graph will be admitted).
+    worst_score: Option<GraphScore>,
+}
+
+impl AdmissionThreshold {
+    /// No threshold — accept everything (board empty or unknown).
+    fn open() -> Self {
+        Self {
+            worst_score: None,
+        }
+    }
+
+    /// Build from server threshold response.
+    fn from_response(resp: &ThresholdResponse) -> Self {
+        let worst_score = if resp.entry_count >= resp.capacity {
+            // Board is full — need to beat the worst entry
+            match (resp.worst_tier1_max, resp.worst_tier1_min, resp.worst_tier2_aut, resp.worst_tier3_cid.as_ref()) {
+                (Some(t1_max), Some(t1_min), Some(t2_aut), Some(t3_cid)) => {
+                    // Reconstruct a GraphScore for comparison.
+                    // omega/alpha/c_omega/c_alpha are set to satisfy tier1 = (t1_max, t1_min).
+                    match GraphCid::from_hex(t3_cid) {
+                        Ok(cid) => Some(GraphScore::new(0, 0, t1_max, t1_min, t2_aut, cid)),
+                        Err(_) => None, // Can't parse CID — skip threshold filtering
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None // Board not full — any valid graph is admitted
+        };
+
+        Self { worst_score }
+    }
+
+    /// Would a graph with this score be admitted?
+    fn would_admit(&self, score: &GraphScore) -> bool {
+        match &self.worst_score {
+            None => true, // Board not full — everything is admitted
+            Some(worst) => {
+                // Score ordering: lower is better. A candidate is admitted
+                // if it's strictly better than (less than) the worst entry.
+                score < worst
+            }
+        }
+    }
+}
 
 /// Configuration for the worker loop.
 pub struct WorkerConfig {
@@ -38,13 +93,14 @@ async fn submit_discoveries(
     client: &ServerClient,
     collector: &DiscoveryCollector,
     known: &KnownCids,
+    threshold: &AdmissionThreshold,
     k: u32,
     ell: u32,
     n: u32,
-) -> (usize, usize) {
+) -> (usize, usize, usize) {
     let discoveries = collector.drain();
     if discoveries.is_empty() {
-        return (0, 0);
+        return (0, 0, 0);
     }
 
     // Immediately mark all drained CIDs as known, closing the race window
@@ -57,9 +113,22 @@ async fn submit_discoveries(
 
     let mut submitted = 0usize;
     let mut admitted = 0usize;
+    let mut skipped = 0usize;
 
     for discovery in &discoveries {
         let cid_hex = discovery.cid.to_hex();
+
+        // Pre-check: would this score beat the server's leaderboard threshold?
+        // If not, skip the HTTP round-trip entirely.
+        if !threshold.would_admit(&discovery.score) {
+            debug!(
+                graph_cid = %cid_hex,
+                "skipping submission — score below leaderboard threshold"
+            );
+            skipped += 1;
+            continue;
+        }
+
         let rgxf_json = rgxf::to_json(&discovery.graph);
         match client.submit(k, ell, n, rgxf_json).await {
             Ok(resp) => {
@@ -78,9 +147,6 @@ async fn submit_discoveries(
                 if was_admitted {
                     admitted += 1;
                     info!("admitted to leaderboard! rank={}", resp.rank.unwrap_or(0));
-                    // No redundant viz push here — the graph was already submitted
-                    // to the viz leaderboard during the search (via CollectorObserver)
-                    // with the canonical CID.
                 }
             }
             Err(e) => {
@@ -89,7 +155,7 @@ async fn submit_discoveries(
         }
     }
 
-    (submitted, admitted)
+    (submitted, admitted, skipped)
 }
 
 // ── Main worker loop ────────────────────────────────────────────────
@@ -118,6 +184,11 @@ pub async fn run_worker(
     // has been seen before (on the leaderboard, submitted, or discovered).
     let known = KnownCids::new();
 
+    // Admission threshold: updated each round from the server. Used to
+    // pre-filter candidates so we only submit graphs that would actually
+    // beat the leaderboard.
+    let mut threshold = AdmissionThreshold::open();
+
     loop {
         // Check shutdown
         if *shutdown.borrow() {
@@ -125,15 +196,17 @@ pub async fn run_worker(
             return Ok(());
         }
 
-        // Fetch threshold
+        // Fetch threshold and update admission filter
         match client.get_threshold(k, ell, target_n).await {
-            Ok(info) => {
+            Ok(resp) => {
                 info!(
                     k, ell, target_n,
-                    entries = info.entry_count,
-                    capacity = info.capacity,
+                    entries = resp.entry_count,
+                    capacity = resp.capacity,
+                    worst_t1 = ?resp.worst_tier1_max,
                     "fetched leaderboard threshold"
                 );
+                threshold = AdmissionThreshold::from_response(&resp);
             }
             Err(e) => {
                 warn!("failed to fetch threshold: {e}");
@@ -280,12 +353,14 @@ pub async fn run_worker(
                         }
 
                         // Final drain + submit any remaining discoveries
-                        let (sub, adm) = submit_discoveries(
-                            &client, &collector_for_submit, &known,
+                        let (sub, adm, skip) = submit_discoveries(
+                            &client, &collector_for_submit, &known, &threshold,
                             k, ell, target_n,
                         ).await;
+                        if sub > 0 || skip > 0 {
+                            info!(submitted = sub, admitted = adm, skipped = skip, "final submission batch");
+                        }
                         if sub > 0 {
-                            info!(submitted = sub, admitted = adm, "final submission batch");
                             found = true;
                         }
 
@@ -313,12 +388,14 @@ pub async fn run_worker(
                         }
 
                         // Periodic drain + submit while search is still running
-                        let (sub, adm) = submit_discoveries(
-                            &client, &collector_for_submit, &known,
+                        let (sub, adm, skip) = submit_discoveries(
+                            &client, &collector_for_submit, &known, &threshold,
                             k, ell, target_n,
                         ).await;
+                        if sub > 0 || skip > 0 {
+                            info!(submitted = sub, admitted = adm, skipped = skip, "periodic submission batch");
+                        }
                         if sub > 0 {
-                            info!(submitted = sub, admitted = adm, "periodic submission batch");
                             found = true;
                             consecutive_failures = 0;
                         }
