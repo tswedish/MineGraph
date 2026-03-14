@@ -14,7 +14,8 @@ use ramseynet_verifier::{verify_ramsey, VerifyRequest, VerifyResponse};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::cors::CorsLayer;
-use tracing::{info, warn};
+use tower_http::trace::TraceLayer;
+use tracing::{debug, info, warn};
 
 // ── Application state ────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ async fn list_leaderboards(
         .await
         .unwrap()
         .map_err(map_ledger_error)?;
+    debug!(count = summaries.len(), "listing leaderboards");
     Ok(Json(json!({ "leaderboards": summaries })))
 }
 
@@ -78,6 +80,7 @@ async fn list_n_for_pair(
         .await
         .unwrap()
         .map_err(map_ledger_error)?;
+    debug!(k = params.k, ell = params.ell, n_values = ?ns, "listing n values for pair");
     Ok(Json(json!({ "k": params.k, "ell": params.ell, "n_values": ns })))
 }
 
@@ -107,6 +110,12 @@ async fn get_leaderboard(
         None
     };
 
+    debug!(
+        k = params.k, ell = params.ell, n,
+        entries = entries.len(),
+        "serving leaderboard detail"
+    );
+
     Ok(Json(json!({
         "k": params.k,
         "ell": params.ell,
@@ -128,6 +137,7 @@ async fn get_threshold(
         .await
         .unwrap()
         .map_err(map_ledger_error)?;
+    debug!(k = params.k, ell = params.ell, n, "serving threshold");
     Ok(Json(json!(info)))
 }
 
@@ -152,6 +162,8 @@ async fn get_leaderboard_graphs(
         .into_iter()
         .filter_map(|s| serde_json::from_str(&s).ok())
         .collect();
+
+    debug!(k = rp.k, ell = rp.ell, n, count = graphs.len(), "serving leaderboard graphs");
 
     Ok(Json(json!({
         "k": rp.k,
@@ -370,6 +382,7 @@ async fn get_submission(
     State(state): State<Arc<AppState>>,
     Path(cid): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    debug!(cid = %cid, "fetching submission detail");
     let ledger = state.ledger.clone();
     let detail = tokio::task::spawn_blocking(move || ledger.get_submission_detail(&cid))
         .await
@@ -422,6 +435,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/submissions/{cid}", get(get_submission))
         .route("/api/verify", post(verify))
         .route("/api/submit", post(submit_graph))
+        .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

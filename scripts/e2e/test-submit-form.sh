@@ -21,41 +21,23 @@ assert_text "RGXF" "RGXF JSON input visible"
 log_test "4.3 Submit accepted graph"
 navigate "$E2E_BASE_URL/submit"
 sleep 1
-snap
 
-# Find the K spinbutton (accessible name is exactly "K")
-K_REF=$(find_ref 'spinbutton "K"' || true)
-if [[ -n "$K_REF" ]]; then
-  fill_ref "$K_REF" "4"
-fi
+# Fill form using Playwright role-based locators (no snapshot-ref needed)
+fill_by_role "spinbutton" "K" "4"
+fill_by_role "spinbutton" "L" "4"
 
-# Find the L spinbutton
-snap
-L_REF=$(find_ref 'spinbutton "L"' || true)
-if [[ -n "$L_REF" ]]; then
-  fill_ref "$L_REF" "4"
-fi
-
-# Find the RGXF textarea (shows as textbox "RGXF JSON" in accessibility tree)
 RGXF_JSON='{"n": 5, "encoding": "utri_b64_v1", "bits_b64": "mUA="}'
-snap
-TEXTAREA_REF=$(find_ref 'textbox "RGXF' || true)
-if [[ -n "$TEXTAREA_REF" ]]; then
-  fill_ref "$TEXTAREA_REF" "$RGXF_JSON"
-  sleep 2
-fi
+fill_by_role "textbox" "RGXF JSON" "$RGXF_JSON"
+sleep 2
 
 snap
 
 # Check that preview appeared (MatrixView canvas has aria-label)
 assert_text "Adjacency matrix" "Live preview matrix rendered after RGXF paste"
 
-# Find and click Submit button
-SUBMIT_REF=$(find_ref "Submit Graph" || find_ref "Submit graph" || true)
-if [[ -n "$SUBMIT_REF" ]]; then
-  click_ref "$SUBMIT_REF"
-  sleep 2
-fi
+# Click submit
+click_by_role "button" "Submit Graph"
+sleep 2
 
 snap
 
@@ -66,37 +48,16 @@ assert_text "accepted" "Result shows 'accepted' verdict"
 log_test "4.4 Submit rejected graph"
 navigate "$E2E_BASE_URL/submit"
 sleep 2
-snap
 
-# Fill K=3
-K_REF=$(find_ref 'spinbutton "K"' || true)
-if [[ -n "$K_REF" ]]; then
-  fill_ref "$K_REF" "3"
-fi
+fill_by_role "spinbutton" "K" "3"
+fill_by_role "spinbutton" "L" "3"
 
-# Fill L=3
-snap
-L_REF=$(find_ref 'spinbutton "L"' || true)
-if [[ -n "$L_REF" ]]; then
-  fill_ref "$L_REF" "3"
-fi
-
-# Paste K5 (complete graph) RGXF — this should be rejected (has 3-clique)
 K5_JSON='{"n": 5, "encoding": "utri_b64_v1", "bits_b64": "/8A="}'
-snap
-TEXTAREA_REF=$(find_ref 'textbox "RGXF' || true)
-if [[ -n "$TEXTAREA_REF" ]]; then
-  fill_ref "$TEXTAREA_REF" "$K5_JSON"
-  sleep 2
-fi
+fill_by_role "textbox" "RGXF JSON" "$K5_JSON"
+sleep 2
 
-# Click submit
-snap
-SUBMIT_REF=$(find_ref "Submit Graph" || find_ref "Submit graph" || true)
-if [[ -n "$SUBMIT_REF" ]]; then
-  click_ref "$SUBMIT_REF"
-  sleep 2
-fi
+click_by_role "button" "Submit Graph"
+sleep 2
 
 snap
 
@@ -108,14 +69,9 @@ assert_text "clique" "Reason mentions clique"
 log_test "4.5 Invalid JSON handling"
 navigate "$E2E_BASE_URL/submit"
 sleep 2
-snap
 
-# Find textarea and type invalid JSON
-TEXTAREA_REF=$(find_ref 'textbox "RGXF' || true)
-if [[ -n "$TEXTAREA_REF" ]]; then
-  fill_ref "$TEXTAREA_REF" "not valid json at all"
-  sleep 2
-fi
+fill_by_role "textbox" "RGXF JSON" "not valid json at all"
+sleep 2
 
 snap
 

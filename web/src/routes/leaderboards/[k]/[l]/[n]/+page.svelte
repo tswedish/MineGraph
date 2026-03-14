@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { onDestroy } from 'svelte';
 	import { getLeaderboard, getLeaderboardGraphs, type LeaderboardDetail, type RgxfJson } from '$lib/api';
 	import MatrixView from '$lib/components/MatrixView.svelte';
 	import CircleLayout from '$lib/components/CircleLayout.svelte';
@@ -13,9 +12,11 @@
 	let graphs = $state<RgxfJson[]>([]);
 	let now = $state(Date.now());
 
-	// Tick every 5s for relative timestamps
-	const tickInterval = setInterval(() => { now = Date.now(); }, 5_000);
-	onDestroy(() => clearInterval(tickInterval));
+	// Tick every 5s for relative timestamps (uses $effect cleanup, not onDestroy)
+	$effect(() => {
+		const tick = setInterval(() => { now = Date.now(); }, 5_000);
+		return () => clearInterval(tick);
+	});
 
 	// Track previous CIDs to detect new entries on refresh
 	let prevCids = new Set<string>();
@@ -123,17 +124,82 @@
 		refresh(k, l, n);
 	});
 
-	// Poll for leaderboard updates every 10 seconds
+	// Smart polling: visibility-aware with error backoff
 	$effect(() => {
 		const k = Number(page.params.k);
 		const l = Number(page.params.l);
 		const n = Number(page.params.n);
 
-		const interval = setInterval(() => {
-			refresh(k, l, n);
-		}, 10_000);
+		const BASE_DELAY = 10_000;
+		const MAX_DELAY = 60_000;
+		let delay = BASE_DELAY;
+		let timer: ReturnType<typeof setTimeout>;
+		let refreshing = false;
 
-		return () => clearInterval(interval);
+		function scheduleNext() {
+			timer = setTimeout(poll, delay);
+		}
+
+		async function poll() {
+			if (typeof document !== 'undefined' && document.hidden) {
+				scheduleNext();
+				return;
+			}
+			if (refreshing) {
+				scheduleNext();
+				return;
+			}
+			refreshing = true;
+			try {
+				await Promise.all([
+					getLeaderboard(k, l, n),
+					getLeaderboardGraphs(k, l, n)
+				]).then(([data, graphData]) => {
+					const newFlash = new Set<string>();
+					for (const entry of data.entries) {
+						if (!prevCids.has(entry.graph_cid)) {
+							newFlash.add(entry.graph_cid);
+						}
+					}
+					prevCids = new Set(data.entries.map((e) => e.graph_cid));
+					detail = data;
+					graphs = graphData;
+					if (newFlash.size > 0) {
+						flashCids = newFlash;
+						setTimeout(() => { flashCids = new Set(); }, 1500);
+					}
+					error = '';
+				});
+				delay = BASE_DELAY; // reset on success
+			} catch (e) {
+				error = e instanceof Error ? e.message : 'Failed to refresh';
+				delay = Math.min(delay * 2, MAX_DELAY); // backoff on error
+			} finally {
+				refreshing = false;
+				scheduleNext();
+			}
+		}
+
+		// Resume polling immediately when tab becomes visible
+		function onVisible() {
+			if (typeof document !== 'undefined' && !document.hidden) {
+				clearTimeout(timer);
+				delay = BASE_DELAY;
+				poll();
+			}
+		}
+
+		if (typeof document !== 'undefined') {
+			document.addEventListener('visibilitychange', onVisible);
+		}
+		scheduleNext();
+
+		return () => {
+			clearTimeout(timer);
+			if (typeof document !== 'undefined') {
+				document.removeEventListener('visibilitychange', onVisible);
+			}
+		};
 	});
 </script>
 

@@ -198,10 +198,9 @@ echo -e "${GREEN}[OK]${NC}    Browser opened"
 echo ""
 echo -e "${BOLD}--- Running tests ---${NC}"
 
-TOTAL_PASS=0
-TOTAL_FAIL=0
-TOTAL_SKIP=0
-SUITE_RESULTS=""
+SUITES_PASSED=0
+SUITES_FAILED=0
+FAILED_NAMES=""
 
 run_test_suite() {
   local name="$1"
@@ -215,23 +214,26 @@ run_test_suite() {
   echo ""
   echo -e "${BOLD}>>> Running: test-${name}.sh <<<${NC}"
 
-  # Run the test in a subshell to capture its exit code
-  # but don't exit the orchestrator on failure
   local result=0
   bash "$script" || result=$?
 
-  return $result
+  if [[ $result -eq 0 ]]; then
+    ((SUITES_PASSED++)) || true
+  else
+    ((SUITES_FAILED++)) || true
+    FAILED_NAMES="$FAILED_NAMES $name"
+  fi
+
+  return 0  # Don't exit orchestrator on suite failure
 }
 
 if [[ -n "$SINGLE_TEST" ]]; then
-  # Run single test suite
-  run_test_suite "$SINGLE_TEST" || true
+  run_test_suite "$SINGLE_TEST"
 else
-  # Run all test suites in order
   SUITES=("homepage" "leaderboards" "submission" "submit-form" "navigation")
 
   for suite in "${SUITES[@]}"; do
-    run_test_suite "$suite" || true
+    run_test_suite "$suite"
   done
 fi
 
@@ -240,12 +242,22 @@ echo ""
 echo -e "${BOLD}===========================================${NC}"
 echo -e "${BOLD} E2E Test Suite Complete${NC}"
 echo -e "${BOLD}===========================================${NC}"
+echo -e "  ${GREEN}Suites passed:${NC} $SUITES_PASSED"
+echo -e "  ${RED}Suites failed:${NC} $SUITES_FAILED"
+if [[ -n "$FAILED_NAMES" ]]; then
+  echo -e "  ${RED}Failed:${NC}$FAILED_NAMES"
+fi
+echo -e "${BOLD}===========================================${NC}"
 echo ""
 echo "Server logs: logs/e2e-server.log, logs/e2e-web.log"
-echo "Snapshots:   .playwright-cli/snap-*.yml"
 echo ""
 echo "To re-run with existing servers:"
 echo "  ./scripts/e2e-test.sh --no-server"
 echo ""
 echo "To run a single suite:"
 echo "  ./scripts/e2e-test.sh --no-server --test homepage"
+
+# Exit non-zero if any suite failed
+if [[ $SUITES_FAILED -gt 0 ]]; then
+  exit 1
+fi

@@ -56,12 +56,15 @@ assert_url "/leaderboards" "Browser back returns to leaderboards"
 
 # ── Test 5.6: 404 / unknown route handling ─────────────────────────
 log_test "5.6 Unknown route"
-navigate "$E2E_BASE_URL/nonexistent-page"
+# Navigate via run-code to avoid navigate() blocking on error pages
+pw run-code "await page.goto('$E2E_BASE_URL/nonexistent-page', { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {})" >/dev/null 2>&1 || true
+sleep 3
 snap
 
-# SPA should still load (fallback: 'index.html') — no server 404
-# The page may redirect to home or show the layout
-assert_text "RamseyNet" "Unknown route still loads SPA shell"
+# Custom +error.svelte renders with the app layout (nav + error content)
+# The nav still contains "RamseyNet" and the error page shows the status code
+assert_text "RamseyNet" "Unknown route still loads SPA shell with nav"
+assert_text "404" "Error page shows 404 status"
 
 # ── Summary ─────────────────────────────────────────────────────────
 print_summary

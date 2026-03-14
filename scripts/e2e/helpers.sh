@@ -288,6 +288,42 @@ type_text() {
   sleep 1
 }
 
+# ── Role-based interaction helpers (Playwright API) ─────────────────
+# These use `pw run-code` with the full Playwright locator API,
+# bypassing the fragile snapshot-grep-ref pipeline for form interactions.
+
+# Fill a form element by ARIA role and accessible name.
+# Usage: fill_by_role "textbox" "RGXF JSON" '{"n":5,...}'
+fill_by_role() {
+  local role="$1"
+  local name="$2"
+  local value="$3"
+  log_info "Filling $role '$name'"
+  pw run-code "await page.getByRole('$role', { name: '$name' }).fill(\`$value\`)" >/dev/null 2>&1 || true
+  sleep 1
+}
+
+# Click an element by ARIA role and accessible name.
+# Usage: click_by_role "button" "Submit Graph"
+click_by_role() {
+  local role="$1"
+  local name="$2"
+  log_info "Clicking $role '$name'"
+  local output
+  output=$(pw run-code "await page.getByRole('$role', { name: '$name' }).click()" 2>&1 || true)
+  sleep 3
+  # Update URL/title if click triggered navigation
+  local url_line title_line
+  url_line=$(echo "$output" | grep "Page URL:" | tail -1 || true)
+  title_line=$(echo "$output" | grep "Page Title:" | tail -1 || true)
+  if [[ -n "$url_line" ]]; then
+    LAST_PAGE_URL=$(echo "$url_line" | sed 's/.*Page URL: //' | tr -d '[:space:]')
+  fi
+  if [[ -n "$title_line" ]]; then
+    LAST_PAGE_TITLE=$(echo "$title_line" | sed 's/.*Page Title: //')
+  fi
+}
+
 # ── Server health checks ───────────────────────────────────────────
 
 wait_for_api() {
