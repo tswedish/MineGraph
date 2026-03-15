@@ -52,10 +52,11 @@ Rust workspace (`crates/`) + SvelteKit 2 (`web/`).
 
 Every valid (K,L,n) triple implicitly defines a leaderboard of capacity 10,000 (configurable via `--leaderboard-capacity` on the server). No explicit "challenges" — submit directly with `{k, ell, n, graph}`. Capacity can be changed at server restart — shrinking trims the lowest-ranked entries automatically.
 
-**Scoring** (3-tier lexicographic, lower is better):
+**Scoring** (4-tier lexicographic, lower is better):
 - **T1**: `(max(C_omega, C_alpha), min(C_omega, C_alpha))` — clique counts, lowest wins
-- **T2**: `|Aut(G)|` — automorphism group order, highest wins
-- **T3**: CID — deterministic tiebreaker, smallest wins
+- **T2**: Goodman gap — distance from Goodman's minimum monochromatic triangles, lowest wins (0 = optimal)
+- **T3**: `|Aut(G)|` — automorphism group order, highest wins
+- **T4**: CID — deterministic tiebreaker, smallest wins
 
 K ≤ L canonical form enforced everywhere (R(K,L) = R(L,K)).
 

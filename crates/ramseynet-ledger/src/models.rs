@@ -35,6 +35,7 @@ pub struct LeaderboardEntry {
     pub rank: u32,
     pub tier1_max: u64,
     pub tier1_min: u64,
+    pub goodman_gap: u64,
     pub tier2_aut: f64,
     pub score_json: String,
     pub admitted_at: DateTime<Utc>,

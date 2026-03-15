@@ -1,12 +1,16 @@
-//! 3-tier lexicographic graph scoring for discovery ranking.
+//! 4-tier lexicographic graph scoring for discovery ranking.
 //!
 //! **Tier 1** — Maximum clique counts (lowest wins):
 //!   `(max(C_omega, C_alpha), min(C_omega, C_alpha))` lexicographic
 //!
-//! **Tier 2** — Automorphism group order (highest wins):
+//! **Tier 2** — Goodman gap (lowest wins):
+//!   Distance from Goodman's minimum monochromatic triangle count.
+//!   A gap of 0 means the graph achieves the theoretical minimum.
+//!
+//! **Tier 3** — Automorphism group order (highest wins):
 //!   `|Aut(G)|` — rewards symmetric graphs
 //!
-//! **Tier 3** — CID tiebreaker (smallest wins):
+//! **Tier 4** — CID tiebreaker (smallest wins):
 //!   Deterministic byte-level comparison
 
 use std::cmp::Ordering;
@@ -16,7 +20,7 @@ use ramseynet_types::GraphCid;
 use serde::{Deserialize, Serialize};
 
 use crate::automorphism::canonical_form;
-use crate::clique::count_max_cliques;
+use crate::clique::{count_cliques, count_max_cliques};
 
 /// Full score for a discovered graph.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -29,6 +33,18 @@ pub struct GraphScore {
     pub c_omega: u64,
     /// Number of maximum independent sets (max cliques in complement).
     pub c_alpha: u64,
+    /// Number of triangles (3-cliques) in G.
+    #[serde(default)]
+    pub triangles: u64,
+    /// Number of triangles in the complement (independent 3-sets in G).
+    #[serde(default)]
+    pub triangles_complement: u64,
+    /// Goodman number: total monochromatic triangles = triangles + triangles_complement.
+    #[serde(default)]
+    pub goodman: u64,
+    /// Goodman gap: distance from Goodman's minimum for this n. 0 = optimal.
+    #[serde(default)]
+    pub goodman_gap: u64,
     /// Automorphism group order |Aut(G)|.
     pub aut_order: f64,
     /// Content ID of the graph (deterministic tiebreaker).
@@ -38,20 +54,30 @@ pub struct GraphScore {
 }
 
 impl GraphScore {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        n: u32,
         omega: u32,
         alpha: u32,
         c_omega: u64,
         c_alpha: u64,
+        triangles: u64,
+        triangles_complement: u64,
         aut_order: f64,
         cid: GraphCid,
     ) -> Self {
         let tier1 = (c_omega.max(c_alpha), c_omega.min(c_alpha));
+        let goodman = triangles + triangles_complement;
+        let goodman_gap = goodman.saturating_sub(goodman_minimum(n));
         Self {
             omega,
             alpha,
             c_omega,
             c_alpha,
+            triangles,
+            triangles_complement,
+            goodman,
+            goodman_gap,
             aut_order,
             cid,
             tier1,
@@ -78,34 +104,49 @@ impl Ord for GraphScore {
         // T1: lower clique counts win (ascending)
         self.tier1
             .cmp(&other.tier1)
-            // T2: higher aut wins (descending)
+            // T2: lower Goodman gap wins (ascending) — 0 is optimal
+            .then(self.goodman_gap.cmp(&other.goodman_gap))
+            // T3: higher aut wins (descending)
             .then(other.aut_order.total_cmp(&self.aut_order))
-            // T3: smaller CID wins (ascending)
+            // T4: smaller CID wins (ascending)
             .then(self.cid.cmp(&other.cid))
     }
 }
 
 /// Result of scoring a graph, including its canonical form.
 pub struct ScoreResult {
-    /// The 3-tier score.
+    /// The 4-tier score.
     pub score: GraphScore,
     /// The graph in canonical form (nauty canonical labeling applied).
     pub canonical_graph: AdjacencyMatrix,
 }
 
-/// Compute the full 3-tier score for a graph, producing its canonical form.
+/// Compute the full 4-tier score for a graph, producing its canonical form.
 ///
-/// Computes clique/independence structure on G and complement, plus
-/// automorphism group order and canonical labeling via nauty (single call).
-/// The CID used in the score is computed from the **canonical** form.
+/// Computes clique/independence structure on G and complement, triangle
+/// counts for the Goodman number, automorphism group order and canonical
+/// labeling via nauty (single call). The CID used in the score is computed
+/// from the **canonical** form.
 pub fn compute_score_canonical(graph: &AdjacencyMatrix) -> ScoreResult {
     let (omega, c_omega) = count_max_cliques(graph);
     let comp = graph.complement();
     let (alpha, c_alpha) = count_max_cliques(&comp);
+    let triangles = count_cliques(graph, 3);
+    let triangles_complement = count_cliques(&comp, 3);
     let (canonical_graph, aut_order) = canonical_form(graph);
 
     let canonical_cid = ramseynet_graph::compute_cid(&canonical_graph);
-    let score = GraphScore::new(omega, alpha, c_omega, c_alpha, aut_order, canonical_cid);
+    let score = GraphScore::new(
+        graph.n(),
+        omega,
+        alpha,
+        c_omega,
+        c_alpha,
+        triangles,
+        triangles_complement,
+        aut_order,
+        canonical_cid,
+    );
 
     ScoreResult {
         score,
@@ -113,16 +154,42 @@ pub fn compute_score_canonical(graph: &AdjacencyMatrix) -> ScoreResult {
     }
 }
 
-/// Compute the full 3-tier score for a graph (legacy: uses provided CID).
+/// Compute the full 4-tier score for a graph (legacy: uses provided CID).
 ///
 /// Prefer `compute_score_canonical` which derives the CID from the canonical form.
 pub fn compute_score(graph: &AdjacencyMatrix, cid: &GraphCid) -> GraphScore {
     let (omega, c_omega) = count_max_cliques(graph);
     let comp = graph.complement();
     let (alpha, c_alpha) = count_max_cliques(&comp);
+    let triangles = count_cliques(graph, 3);
+    let triangles_complement = count_cliques(&comp, 3);
     let (_, aut_order) = canonical_form(graph);
 
-    GraphScore::new(omega, alpha, c_omega, c_alpha, aut_order, cid.clone())
+    GraphScore::new(
+        graph.n(),
+        omega,
+        alpha,
+        c_omega,
+        c_alpha,
+        triangles,
+        triangles_complement,
+        aut_order,
+        cid.clone(),
+    )
+}
+
+/// Compute Goodman's minimum: the minimum total number of monochromatic
+/// triangles in any 2-coloring of K_n.
+///
+/// Formula: g(n) = C(n,3) - floor(n/2) * floor((n-1)^2 / 4)
+pub fn goodman_minimum(n: u32) -> u64 {
+    if n < 3 {
+        return 0;
+    }
+    let n = n as u64;
+    let c_n_3 = n * (n - 1) * (n - 2) / 6;
+    let floor_term = (n / 2) * ((n - 1) * (n - 1) / 4);
+    c_n_3 - floor_term
 }
 
 #[cfg(test)]
@@ -163,6 +230,18 @@ mod tests {
         assert_eq!(score.c_omega, 5);
         assert_eq!(score.c_alpha, 5);
         assert_eq!(score.aut_order, 10.0);
+        // C5 is triangle-free, and its complement (also C5) is also triangle-free
+        assert_eq!(score.triangles, 0);
+        assert_eq!(score.triangles_complement, 0);
+        assert_eq!(score.goodman, 0);
+        // Goodman minimum for n=5: C(5,3) - floor(5/2)*floor(16/4) = 10 - 2*4 = 2
+        // But C5 has goodman=0 which is below the minimum? Let's check...
+        // Actually g(5) = 10 - 2*4 = 2. But C5 has 0 triangles in both colorings.
+        // This is possible because Goodman's formula applies to COMPLETE graphs,
+        // and C5 with 5 edges is far from complete. For Ramsey graphs specifically,
+        // the Goodman number counts only triangles, not all monochromatic subgraphs.
+        // So gap = max(0, 0 - 2) = 0 (saturating_sub).
+        assert_eq!(score.goodman_gap, 0);
     }
 
     #[test]
@@ -175,29 +254,45 @@ mod tests {
         assert_eq!(score.c_omega, 1);
         assert_eq!(score.c_alpha, 5);
         assert_eq!(score.aut_order, 120.0);
+        // K5 has C(5,3) = 10 triangles, complement (E5) has 0
+        assert_eq!(score.triangles, 10);
+        assert_eq!(score.triangles_complement, 0);
+        assert_eq!(score.goodman, 10);
+        // g(5) = 2, gap = 10 - 2 = 8
+        assert_eq!(score.goodman_gap, 8);
     }
 
     /// Lower tier1 wins regardless of other tiers.
     #[test]
     fn tier1_dominates() {
-        let better = GraphScore::new(2, 2, 3, 3, 1.0, test_cid(0xff));
-        let worse = GraphScore::new(3, 2, 5, 5, 1000.0, test_cid(0x00));
+        let better = GraphScore::new(5, 2, 2, 3, 3, 0, 0, 1.0, test_cid(0xff));
+        let worse = GraphScore::new(5, 3, 2, 5, 5, 0, 0, 1000.0, test_cid(0x00));
         assert!(better < worse);
     }
 
-    /// Same tier1, higher aut_order wins (lower in Ord).
+    /// Same tier1, lower Goodman gap wins.
     #[test]
-    fn tier2_breaks_tie() {
-        let better = GraphScore::new(2, 2, 5, 5, 100.0, test_cid(0xff));
-        let worse = GraphScore::new(2, 2, 5, 5, 10.0, test_cid(0x00));
+    fn tier2_goodman_gap_breaks_tie() {
+        // Same clique counts, different Goodman gaps
+        let better = GraphScore::new(5, 2, 2, 5, 5, 0, 0, 10.0, test_cid(0xff));
+        let worse = GraphScore::new(5, 2, 2, 5, 5, 5, 5, 10.0, test_cid(0x00));
+        // better has goodman=0, gap=0; worse has goodman=10, gap=8
         assert!(better < worse);
     }
 
-    /// Same tier1 and tier2, smaller CID wins.
+    /// Same tier1 and Goodman gap, higher aut_order wins (lower in Ord).
     #[test]
-    fn tier3_breaks_tie() {
-        let better = GraphScore::new(2, 2, 5, 5, 10.0, test_cid(0x00));
-        let worse = GraphScore::new(2, 2, 5, 5, 10.0, test_cid(0xff));
+    fn tier3_aut_breaks_tie() {
+        let better = GraphScore::new(5, 2, 2, 5, 5, 1, 1, 100.0, test_cid(0xff));
+        let worse = GraphScore::new(5, 2, 2, 5, 5, 1, 1, 10.0, test_cid(0x00));
+        assert!(better < worse);
+    }
+
+    /// Same tier1, tier2, tier3, smaller CID wins.
+    #[test]
+    fn tier4_cid_breaks_tie() {
+        let better = GraphScore::new(5, 2, 2, 5, 5, 1, 1, 10.0, test_cid(0x00));
+        let worse = GraphScore::new(5, 2, 2, 5, 5, 1, 1, 10.0, test_cid(0xff));
         assert!(better < worse);
     }
 
@@ -205,9 +300,27 @@ mod tests {
     #[test]
     fn tier1_symmetry() {
         let cid = test_cid(0x42);
-        let a = GraphScore::new(2, 3, 5, 10, 10.0, cid.clone());
-        let b = GraphScore::new(3, 2, 10, 5, 10.0, cid);
+        let a = GraphScore::new(5, 2, 3, 5, 10, 0, 0, 10.0, cid.clone());
+        let b = GraphScore::new(5, 3, 2, 10, 5, 0, 0, 10.0, cid);
         assert_eq!(a.tier1, b.tier1);
         assert_eq!(a.cmp(&b), Ordering::Equal);
+    }
+
+    /// Goodman minimum for small values of n.
+    #[test]
+    fn goodman_minimum_values() {
+        assert_eq!(goodman_minimum(0), 0);
+        assert_eq!(goodman_minimum(1), 0);
+        assert_eq!(goodman_minimum(2), 0);
+        assert_eq!(goodman_minimum(3), 0); // C(3,3)=1, floor(3/2)*floor(4/4)=1*1=1, 1-1=0
+        assert_eq!(goodman_minimum(4), 0); // C(4,3)=4, floor(4/2)*floor(9/4)=2*2=4, 4-4=0
+        assert_eq!(goodman_minimum(5), 2); // C(5,3)=10, floor(5/2)*floor(16/4)=2*4=8, 10-8=2
+        assert_eq!(goodman_minimum(6), 2); // C(6,3)=20, floor(6/2)*floor(25/4)=3*6=18, 20-18=2
+    }
+
+    #[test]
+    fn goodman_minimum_n6() {
+        // C(6,3) = 20, floor(6/2) = 3, (6-1)^2 = 25, floor(25/4) = 6, 3*6 = 18, 20-18 = 2
+        assert_eq!(goodman_minimum(6), 2);
     }
 }

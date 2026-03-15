@@ -146,7 +146,7 @@
 		const offset = (currentPage - 1) * PAGE_SIZE;
 		const allGraphs = await getLeaderboardGraphs(detail.k, detail.ell, detail.n, PAGE_SIZE, offset);
 
-		const header = 'rank,graph_cid,k,ell,n,c_max,c_min,aut_order,admitted_at,encoding,bits_b64';
+		const header = 'rank,graph_cid,k,ell,n,c_max,c_min,goodman_gap,aut_order,admitted_at,encoding,bits_b64';
 		const rows = detail.entries.map((e, i) => {
 			const g = allGraphs[i];
 			const enc = g?.encoding ?? '';
@@ -159,6 +159,7 @@
 				detail!.n,
 				e.tier1_max,
 				e.tier1_min,
+				e.goodman_gap,
 				e.tier2_aut,
 				e.admitted_at,
 				enc,
@@ -327,6 +328,7 @@
 							<th>CID</th>
 							<th>C<sub>max</sub></th>
 							<th>C<sub>min</sub></th>
+							<th title="Goodman gap: distance from minimum monochromatic triangles (0 = optimal)">Gap</th>
 							<th>|Aut|</th>
 							<th>Admitted</th>
 						</tr>
@@ -347,6 +349,7 @@
 								</td>
 								<td class="score">{entry.tier1_max}</td>
 								<td class="score">{entry.tier1_min}</td>
+								<td class="score" class:gap-zero={entry.goodman_gap === 0}>{entry.goodman_gap}</td>
 								<td class="score">{entry.tier2_aut}</td>
 								<td class="timestamp" title={new Date(entry.admitted_at).toLocaleString()}>{formatAdmitted(entry.admitted_at)}</td>
 							</tr>
@@ -575,6 +578,11 @@
 	.score {
 		font-family: var(--font-mono);
 		font-size: 0.8125rem;
+	}
+
+	.score.gap-zero {
+		color: var(--color-accepted);
+		font-weight: 700;
 	}
 
 	.timestamp {

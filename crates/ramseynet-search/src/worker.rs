@@ -40,12 +40,29 @@ impl AdmissionThreshold {
     fn from_response(resp: &ThresholdResponse) -> Self {
         let worst_score = if resp.entry_count >= resp.capacity {
             // Board is full — need to beat the worst entry
-            match (resp.worst_tier1_max, resp.worst_tier1_min, resp.worst_tier2_aut, resp.worst_tier3_cid.as_ref()) {
-                (Some(t1_max), Some(t1_min), Some(t2_aut), Some(t3_cid)) => {
+            match (
+                resp.worst_tier1_max,
+                resp.worst_tier1_min,
+                resp.worst_goodman_gap,
+                resp.worst_tier2_aut,
+                resp.worst_tier3_cid.as_ref(),
+            ) {
+                (Some(t1_max), Some(t1_min), Some(goodman_gap), Some(t2_aut), Some(t3_cid)) => {
                     // Reconstruct a GraphScore for comparison.
-                    // omega/alpha/c_omega/c_alpha are set to satisfy tier1 = (t1_max, t1_min).
+                    // We use n=0 and set triangles to produce the correct goodman_gap.
+                    // Since goodman_minimum(0) = 0, goodman_gap = triangles + 0 - 0.
                     match GraphCid::from_hex(t3_cid) {
-                        Ok(cid) => Some(GraphScore::new(0, 0, t1_max, t1_min, t2_aut, cid)),
+                        Ok(cid) => Some(GraphScore::new(
+                            0,
+                            0,
+                            0,
+                            t1_max,
+                            t1_min,
+                            goodman_gap,
+                            0,
+                            t2_aut,
+                            cid,
+                        )),
                         Err(_) => None, // Can't parse CID — skip threshold filtering
                     }
                 }

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('version', '3');
+INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('version', '4');
 
 CREATE TABLE IF NOT EXISTS graph_submissions (
     graph_cid    TEXT PRIMARY KEY,
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS leaderboard (
     rank         INTEGER NOT NULL,
     tier1_max    INTEGER NOT NULL,
     tier1_min    INTEGER NOT NULL,
+    goodman_gap  INTEGER NOT NULL DEFAULT 0,
     tier2_aut    REAL NOT NULL,
     tier3_cid    TEXT NOT NULL,
     score_json   TEXT NOT NULL,

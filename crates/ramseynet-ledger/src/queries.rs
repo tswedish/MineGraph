@@ -82,6 +82,7 @@ impl Ledger {
 pub struct AdmitScore {
     pub tier1_max: u64,
     pub tier1_min: u64,
+    pub goodman_gap: u64,
     pub tier2_aut: f64,
     pub tier3_cid: String,
     pub score_json: String,
@@ -95,6 +96,7 @@ pub struct ThresholdInfo {
     /// Worst entry's score components (None if board not full).
     pub worst_tier1_max: Option<u64>,
     pub worst_tier1_min: Option<u64>,
+    pub worst_goodman_gap: Option<u64>,
     pub worst_tier2_aut: Option<f64>,
     pub worst_tier3_cid: Option<String>,
 }
@@ -126,7 +128,7 @@ impl Ledger {
         if exists {
             // Already on the board — return existing entry
             let entry = conn.query_row(
-                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, tier2_aut, score_json, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
+                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
                 params![k, ell, n, graph_cid],
                 |row| {
                     Ok(LeaderboardEntry {
@@ -137,9 +139,10 @@ impl Ledger {
                         rank: row.get(4)?,
                         tier1_max: row.get::<_, i64>(5)? as u64,
                         tier1_min: row.get::<_, i64>(6)? as u64,
-                        tier2_aut: row.get(7)?,
-                        score_json: row.get(8)?,
-                        admitted_at: parse_datetime(row.get::<_, String>(9)?),
+                        goodman_gap: row.get::<_, i64>(7)? as u64,
+                        tier2_aut: row.get(8)?,
+                        score_json: row.get(9)?,
+                        admitted_at: parse_datetime(row.get::<_, String>(10)?),
                     })
                 },
             )?;
@@ -156,15 +159,16 @@ impl Ledger {
         if count >= self.capacity {
             // Get the worst entry (highest rank number)
             let worst = conn.query_row(
-                "SELECT tier1_max, tier1_min, tier2_aut, tier3_cid, graph_cid FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank DESC LIMIT 1",
+                "SELECT tier1_max, tier1_min, goodman_gap, tier2_aut, tier3_cid, graph_cid FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank DESC LIMIT 1",
                 params![k, ell, n],
                 |row| {
                     Ok((
                         row.get::<_, i64>(0)? as u64,
                         row.get::<_, i64>(1)? as u64,
-                        row.get::<_, f64>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(2)? as u64,
+                        row.get::<_, f64>(3)?,
                         row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
                     ))
                 },
             )?;
@@ -173,12 +177,14 @@ impl Ledger {
             let is_better = score_cmp(
                 score.tier1_max,
                 score.tier1_min,
+                score.goodman_gap,
                 score.tier2_aut,
                 &score.tier3_cid,
                 worst.0,
                 worst.1,
                 worst.2,
-                &worst.3,
+                worst.3,
+                &worst.4,
             ) == std::cmp::Ordering::Less;
 
             if !is_better {
@@ -188,19 +194,20 @@ impl Ledger {
             // Delete the worst entry
             conn.execute(
                 "DELETE FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
-                params![k, ell, n, worst.4],
+                params![k, ell, n, worst.5],
             )?;
         }
 
         // Insert the new entry (with temporary rank=capacity, will be recomputed)
         let now = Utc::now();
         conn.execute(
-            "INSERT INTO leaderboard (k, ell, n, graph_cid, rank, tier1_max, tier1_min, tier2_aut, tier3_cid, score_json, admitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO leaderboard (k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, tier3_cid, score_json, admitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 k, ell, n, graph_cid,
                 self.capacity,
                 score.tier1_max as i64,
                 score.tier1_min as i64,
+                score.goodman_gap as i64,
                 score.tier2_aut,
                 score.tier3_cid,
                 score.score_json,
@@ -213,7 +220,7 @@ impl Ledger {
 
         // Return the admitted entry
         let entry = conn.query_row(
-            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, tier2_aut, score_json, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
+            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
             params![k, ell, n, graph_cid],
             |row| {
                 Ok(LeaderboardEntry {
@@ -224,9 +231,10 @@ impl Ledger {
                     rank: row.get(4)?,
                     tier1_max: row.get::<_, i64>(5)? as u64,
                     tier1_min: row.get::<_, i64>(6)? as u64,
-                    tier2_aut: row.get(7)?,
-                    score_json: row.get(8)?,
-                    admitted_at: parse_datetime(row.get::<_, String>(9)?),
+                    goodman_gap: row.get::<_, i64>(7)? as u64,
+                    tier2_aut: row.get(8)?,
+                    score_json: row.get(9)?,
+                    admitted_at: parse_datetime(row.get::<_, String>(10)?),
                 })
             },
         )?;
@@ -251,6 +259,7 @@ impl Ledger {
                 capacity: self.capacity,
                 worst_tier1_max: None,
                 worst_tier1_min: None,
+                worst_goodman_gap: None,
                 worst_tier2_aut: None,
                 worst_tier3_cid: None,
             });
@@ -258,14 +267,15 @@ impl Ledger {
 
         // Board is full — return the worst entry's score
         let worst = conn.query_row(
-            "SELECT tier1_max, tier1_min, tier2_aut, tier3_cid FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank DESC LIMIT 1",
+            "SELECT tier1_max, tier1_min, goodman_gap, tier2_aut, tier3_cid FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank DESC LIMIT 1",
             params![k, ell, n],
             |row| {
                 Ok((
                     row.get::<_, i64>(0)? as u64,
                     row.get::<_, i64>(1)? as u64,
-                    row.get::<_, f64>(2)?,
-                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(2)? as u64,
+                    row.get::<_, f64>(3)?,
+                    row.get::<_, String>(4)?,
                 ))
             },
         )?;
@@ -275,8 +285,9 @@ impl Ledger {
             capacity: self.capacity,
             worst_tier1_max: Some(worst.0),
             worst_tier1_min: Some(worst.1),
-            worst_tier2_aut: Some(worst.2),
-            worst_tier3_cid: Some(worst.3),
+            worst_goodman_gap: Some(worst.2),
+            worst_tier2_aut: Some(worst.3),
+            worst_tier3_cid: Some(worst.4),
         })
     }
 
@@ -290,7 +301,7 @@ impl Ledger {
         let (k, ell) = canonical(k, ell);
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, tier2_aut, score_json, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank",
+            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank",
         )?;
         let rows = stmt.query_map(params![k, ell, n], |row| {
             Ok(LeaderboardEntry {
@@ -301,9 +312,10 @@ impl Ledger {
                 rank: row.get(4)?,
                 tier1_max: row.get::<_, i64>(5)? as u64,
                 tier1_min: row.get::<_, i64>(6)? as u64,
-                tier2_aut: row.get(7)?,
-                score_json: row.get(8)?,
-                admitted_at: parse_datetime(row.get::<_, String>(9)?),
+                goodman_gap: row.get::<_, i64>(7)? as u64,
+                tier2_aut: row.get(8)?,
+                score_json: row.get(9)?,
+                admitted_at: parse_datetime(row.get::<_, String>(10)?),
             })
         })?;
         let mut entries = Vec::new();
@@ -332,7 +344,7 @@ impl Ledger {
         )?;
 
         let mut stmt = conn.prepare(
-            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, tier2_aut, score_json, admitted_at \
+            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, admitted_at \
              FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank LIMIT ?4 OFFSET ?5",
         )?;
         let rows = stmt.query_map(params![k, ell, n, limit, offset], |row| {
@@ -344,9 +356,10 @@ impl Ledger {
                 rank: row.get(4)?,
                 tier1_max: row.get::<_, i64>(5)? as u64,
                 tier1_min: row.get::<_, i64>(6)? as u64,
-                tier2_aut: row.get(7)?,
-                score_json: row.get(8)?,
-                admitted_at: parse_datetime(row.get::<_, String>(9)?),
+                goodman_gap: row.get::<_, i64>(7)? as u64,
+                tier2_aut: row.get(8)?,
+                score_json: row.get(9)?,
+                admitted_at: parse_datetime(row.get::<_, String>(10)?),
             })
         })?;
         let mut entries = Vec::new();
@@ -544,7 +557,7 @@ impl Ledger {
         // 3. Get leaderboard entry (optional — may not be admitted)
         let lb_entry: Option<LeaderboardEntry> = conn
             .query_row(
-                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, tier2_aut, score_json, admitted_at FROM leaderboard WHERE graph_cid = ?1 LIMIT 1",
+                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, admitted_at FROM leaderboard WHERE graph_cid = ?1 LIMIT 1",
                 params![cid],
                 |row| {
                     Ok(LeaderboardEntry {
@@ -555,9 +568,10 @@ impl Ledger {
                         rank: row.get(4)?,
                         tier1_max: row.get::<_, i64>(5)? as u64,
                         tier1_min: row.get::<_, i64>(6)? as u64,
-                        tier2_aut: row.get(7)?,
-                        score_json: row.get(8)?,
-                        admitted_at: parse_datetime(row.get::<_, String>(9)?),
+                        goodman_gap: row.get::<_, i64>(7)? as u64,
+                        tier2_aut: row.get(8)?,
+                        score_json: row.get(9)?,
+                        admitted_at: parse_datetime(row.get::<_, String>(10)?),
                     })
                 },
             )
@@ -588,21 +602,22 @@ pub(crate) fn recompute_ranks(
     n: u32,
 ) -> Result<(), LedgerError> {
     let mut stmt = conn.prepare(
-        "SELECT graph_cid, tier1_max, tier1_min, tier2_aut, tier3_cid FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3",
+        "SELECT graph_cid, tier1_max, tier1_min, goodman_gap, tier2_aut, tier3_cid FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3",
     )?;
-    let mut entries: Vec<(String, u64, u64, f64, String)> = stmt
+    let mut entries: Vec<(String, u64, u64, u64, f64, String)> = stmt
         .query_map(params![k, ell, n], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)? as u64,
                 row.get::<_, i64>(2)? as u64,
-                row.get::<_, f64>(3)?,
-                row.get::<_, String>(4)?,
+                row.get::<_, i64>(3)? as u64,
+                row.get::<_, f64>(4)?,
+                row.get::<_, String>(5)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
-    entries.sort_by(|a, b| score_cmp(a.1, a.2, a.3, &a.4, b.1, b.2, b.3, &b.4));
+    entries.sort_by(|a, b| score_cmp(a.1, a.2, a.3, a.4, &a.5, b.1, b.2, b.3, b.4, &b.5));
 
     for (rank, entry) in entries.iter().enumerate() {
         conn.execute(
@@ -613,22 +628,26 @@ pub(crate) fn recompute_ranks(
     Ok(())
 }
 
-/// Compare two score tuples using the 3-tier ordering.
+/// Compare two score tuples using the 4-tier ordering.
 #[allow(clippy::too_many_arguments)]
 fn score_cmp(
     a_t1_max: u64,
     a_t1_min: u64,
+    a_goodman_gap: u64,
     a_t2_aut: f64,
     a_t3_cid: &str,
     b_t1_max: u64,
     b_t1_min: u64,
+    b_goodman_gap: u64,
     b_t2_aut: f64,
     b_t3_cid: &str,
 ) -> std::cmp::Ordering {
     // T1: lower clique counts win (ascending)
     (a_t1_max, a_t1_min)
         .cmp(&(b_t1_max, b_t1_min))
-        // T2: higher aut wins (descending)
+        // T2: lower Goodman gap wins (ascending)
+        .then(a_goodman_gap.cmp(&b_goodman_gap))
+        // T3: higher aut wins (descending)
         .then(b_t2_aut.total_cmp(&a_t2_aut))
         // T3: smaller CID wins (ascending)
         .then(a_t3_cid.cmp(b_t3_cid))

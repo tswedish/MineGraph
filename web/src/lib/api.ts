@@ -46,6 +46,7 @@ export interface LeaderboardEntry {
 	rank: number;
 	tier1_max: number;
 	tier1_min: number;
+	goodman_gap: number;
 	tier2_aut: number;
 	score_json: string;
 	admitted_at: string;
@@ -67,6 +68,7 @@ export interface ThresholdInfo {
 	capacity: number;
 	worst_tier1_max: number | null;
 	worst_tier1_min: number | null;
+	worst_goodman_gap: number | null;
 	worst_tier2_aut: number | null;
 	worst_tier3_cid: string | null;
 }

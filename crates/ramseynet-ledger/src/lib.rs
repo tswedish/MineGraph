@@ -169,6 +169,7 @@ mod tests {
         let score = AdmitScore {
             tier1_max: 5,
             tier1_min: 5,
+            goodman_gap: 0,
             tier2_aut: 10.0,
             tier3_cid: "cid_a".to_string(),
             score_json: "{}".to_string(),
@@ -196,6 +197,7 @@ mod tests {
         let better_score = AdmitScore {
             tier1_max: 3,
             tier1_min: 3,
+            goodman_gap: 0,
             tier2_aut: 20.0,
             tier3_cid: "cid_b".to_string(),
             score_json: "{}".to_string(),
@@ -251,6 +253,7 @@ mod tests {
             let score = AdmitScore {
                 tier1_max: 10 - i as u64, // lower = better, so cid_2 is best
                 tier1_min: 10 - i as u64,
+                goodman_gap: 0,
                 tier2_aut: 1.0,
                 tier3_cid: cid.clone(),
                 score_json: "{}".to_string(),
@@ -282,6 +285,7 @@ mod tests {
         let score = AdmitScore {
             tier1_max: 5,
             tier1_min: 5,
+            goodman_gap: 0,
             tier2_aut: 10.0,
             tier3_cid: "cid_1".to_string(),
             score_json: "{}".to_string(),

@@ -39,6 +39,14 @@
 		return JSON.stringify(rgxf, null, 2);
 	}
 
+	/** Compute Goodman's minimum for n vertices. */
+	function goodmanMinimum(n: number): number {
+		if (n < 3) return 0;
+		const c_n_3 = n * (n - 1) * (n - 2) / 6;
+		const floorTerm = Math.floor(n / 2) * Math.floor((n - 1) * (n - 1) / 4);
+		return c_n_3 - floorTerm;
+	}
+
 	function csvLine(): string {
 		if (!detail || !detail.rgxf) return '';
 		const score = detail.score as Record<string, unknown> | null;
@@ -52,6 +60,8 @@
 			detail.leaderboard_rank ?? '',
 			score?.c_omega ?? '',
 			score?.c_alpha ?? '',
+			score?.goodman ?? '',
+			score?.goodman_gap ?? '',
 			score?.aut_order ?? '',
 			detail.submitted_at,
 			detail.rgxf.encoding,
@@ -62,7 +72,7 @@
 	async function copyToClipboard() {
 		if (!detail?.rgxf) return;
 		const text = includeMetadata
-			? 'graph_cid,k,ell,n,verdict,reason,rank,c_omega,c_alpha,aut_order,submitted_at,encoding,bits_b64\n' + csvLine()
+			? 'graph_cid,k,ell,n,verdict,reason,rank,c_omega,c_alpha,goodman,goodman_gap,aut_order,submitted_at,encoding,bits_b64\n' + csvLine()
 			: rgxfString(detail.rgxf);
 		await navigator.clipboard.writeText(text);
 		copied = true;
@@ -127,6 +137,55 @@
 				</div>
 			{/if}
 		</div>
+
+		{#if detail.score}
+			{@const score = detail.score as Record<string, unknown>}
+			<section class="score-section">
+				<h2>Score Details</h2>
+				<div class="score-grid">
+					<div class="score-item">
+						<span class="score-label">&omega; (clique #)</span>
+						<span class="score-val">{score.omega ?? '?'}</span>
+					</div>
+					<div class="score-item">
+						<span class="score-label">&alpha; (indep #)</span>
+						<span class="score-val">{score.alpha ?? '?'}</span>
+					</div>
+					<div class="score-item">
+						<span class="score-label">C<sub>&omega;</sub> (max cliques)</span>
+						<span class="score-val">{score.c_omega ?? '?'}</span>
+					</div>
+					<div class="score-item">
+						<span class="score-label">C<sub>&alpha;</sub> (max indep)</span>
+						<span class="score-val">{score.c_alpha ?? '?'}</span>
+					</div>
+					<div class="score-item">
+						<span class="score-label">Triangles (G)</span>
+						<span class="score-val">{score.triangles ?? '?'}</span>
+					</div>
+					<div class="score-item">
+						<span class="score-label">Triangles (complement)</span>
+						<span class="score-val">{score.triangles_complement ?? '?'}</span>
+					</div>
+					<div class="score-item">
+						<span class="score-label">Goodman #</span>
+						<span class="score-val">{score.goodman ?? '?'}</span>
+					</div>
+					<div class="score-item">
+						<span class="score-label">Goodman minimum</span>
+						<span class="score-val">{goodmanMinimum(detail.n)}</span>
+					</div>
+					<div class="score-item">
+						<span class="score-label">Goodman gap</span>
+						<span class="score-val" class:gap-optimal={score.goodman_gap === 0}>{score.goodman_gap ?? '?'}</span>
+					</div>
+					<div class="score-item">
+						<span class="score-label">|Aut(G)|</span>
+						<span class="score-val">{score.aut_order ?? '?'}</span>
+					</div>
+				</div>
+			</section>
+		{/if}
 
 		{#if detail.rgxf}
 			<section class="rgxf-section">
@@ -275,6 +334,52 @@
 	.verdict-badge.rejected {
 		color: var(--color-rejected);
 		background: color-mix(in srgb, var(--color-rejected) 15%, transparent);
+	}
+
+	/* ── Score section ───────────────────────────────────────── */
+
+	.score-section {
+		margin-top: 1.5rem;
+		padding-top: 1.5rem;
+		border-top: 1px solid var(--color-border);
+	}
+
+	.score-section h2 {
+		font-family: var(--font-mono);
+		font-size: 1rem;
+		font-weight: 600;
+		margin-bottom: 0.75rem;
+	}
+
+	.score-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+		gap: 0.5rem;
+	}
+
+	.score-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 0.375rem 0.625rem;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 0.375rem;
+	}
+
+	.score-label {
+		font-size: 0.75rem;
+		color: var(--color-text-muted);
+	}
+
+	.score-val {
+		font-family: var(--font-mono);
+		font-size: 0.8125rem;
+		font-weight: 600;
+	}
+
+	.score-val.gap-optimal {
+		color: var(--color-accepted);
 	}
 
 	/* ── RGXF section ────────────────────────────────────────── */

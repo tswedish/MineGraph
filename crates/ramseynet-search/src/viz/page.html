@@ -934,6 +934,7 @@ function createEntryElement(entry) {
   const dupBadge = (entry.times_found || 1) > 1 ? '<span class="dup-count">\u00d7' + entry.times_found + '</span>' : '<span class="dup-count">\u00d71</span>';
   const scoreLine = '<span class="score-line">\u03c9=' + (score.omega||'?') + ' \u03b1=' + (score.alpha||'?') +
     ' | C\u03c9=' + (score.c_omega||'?') + ' C\u03b1=' + (score.c_alpha||'?') +
+    ' | G#=' + (score.goodman||'?') + ' \u0394=' + (score.goodman_gap!=null?score.goodman_gap:'?') +
     ' | Aut:' + formatAut(score.aut_order||0) + '</span>';
 
   const age = lastElapsedMs > entry.found_at_ms ? lastElapsedMs - entry.found_at_ms : 0;
@@ -971,6 +972,8 @@ function showDetail(entry) {
     '<div class="detail-row"><span class="detail-label">\u03b1 (indep #)</span><span class="detail-value">' + (score.alpha||'?') + '</span></div>' +
     '<div class="detail-row"><span class="detail-label">C\u03c9 (max cliques)</span><span class="detail-value">' + (score.c_omega||'?') + '</span></div>' +
     '<div class="detail-row"><span class="detail-label">C\u03b1 (max indep)</span><span class="detail-value">' + (score.c_alpha||'?') + '</span></div>' +
+    '<div class="detail-row"><span class="detail-label">Goodman #</span><span class="detail-value">' + (score.goodman!=null?score.goodman:'?') + '</span></div>' +
+    '<div class="detail-row"><span class="detail-label">Goodman gap</span><span class="detail-value">' + (score.goodman_gap!=null?score.goodman_gap:'?') + '</span></div>' +
     '<div class="detail-row"><span class="detail-label">|Aut(G)|</span><span class="detail-value">' + (score.aut_order||'?') + '</span></div>' +
     '<div class="detail-row"><span class="detail-label">Times found</span><span class="detail-value">' + (entry.times_found||1) + '</span></div>' +
     '<div class="detail-row"><span class="detail-label">RGXF</span></div>' +

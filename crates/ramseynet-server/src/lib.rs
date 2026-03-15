@@ -400,6 +400,7 @@ async fn submit_graph(
         let admit_score = AdmitScore {
             tier1_max: graph_score.c_omega.max(graph_score.c_alpha),
             tier1_min: graph_score.c_omega.min(graph_score.c_alpha),
+            goodman_gap: graph_score.goodman_gap,
             tier2_aut: graph_score.aut_order,
             tier3_cid: cid_hex.clone(),
             score_json: serde_json::to_string(graph_score).unwrap(),

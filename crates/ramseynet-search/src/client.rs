@@ -16,6 +16,7 @@ pub struct ThresholdResponse {
     pub capacity: u32,
     pub worst_tier1_max: Option<u64>,
     pub worst_tier1_min: Option<u64>,
+    pub worst_goodman_gap: Option<u64>,
     pub worst_tier2_aut: Option<f64>,
     pub worst_tier3_cid: Option<String>,
 }
