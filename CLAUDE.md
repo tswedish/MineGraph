@@ -10,7 +10,7 @@ Permissionless protocol for distributed Ramsey graph search and deterministic ge
 ./run server      # API server on :3001
 ./run server-log  # API server with file logging
 ./run web-dev     # SvelteKit dev server on :5173
-./run search      # Search worker (requires --k, --ell, --n; see below)
+./run search      # Search worker (--k, --ell, --n for auto-start; omit for idle mode)
 ./run seed        # Seed DB with test data
 ```
 
@@ -20,12 +20,12 @@ Other commands: `clippy`, `build`, `web` (production build), `bench` (criterion 
 
 ```
 ./run search --k 3 --ell 3 --n 5                     # all strategies, default server
-./run search --k 3 --ell 3 --n 5 --strategy greedy
+./run search --k 3 --ell 3 --n 5 --strategy tree
 ./run search --k 3 --ell 4 --n 8 --server http://remote:3001 --max-iters 50000
 ./run search --k 4 --ell 4 --n 17 --offline --port 8080  # no server needed
 ```
 
-Options: `--strategy {tree|all}`, `--init {perturbed-paley|paley|random|leaderboard}`, `--noise-flips N`, `--max-iters N`, `--beam-width N`, `--max-depth N`, `--port PORT`, `--offline`, `--no-backoff`, `--sample-bias F`, `--leaderboard-sample-size N`, `--collector-capacity N`.
+Options: `--strategy {tree|all}`, `--init {perturbed-paley|paley|random|leaderboard}`, `--noise-flips N`, `--max-iters N`, `--beam-width N`, `--max-depth N`, `--port PORT`, `--offline`, `--no-backoff`, `--sample-bias F`, `--leaderboard-sample-size N`, `--collector-capacity N`, `--max-known-cids N`.
 
 **Discovery submission:** All valid graphs found during search (not just the final result) are collected in a bounded, score-sorted buffer (default 1,000, configurable via `--collector-capacity`) and submitted to the server. This is especially useful for tree/beam search which discovers many valid graphs per run.
 
@@ -37,7 +37,7 @@ Options: `--strategy {tree|all}`, `--init {perturbed-paley|paley|random|leaderbo
 
 Rust workspace (`crates/`) + SvelteKit 2 (`web/`).
 
-**Crate dependency order:** `types` → `graph` → `verifier` → `worker-api` → `{strategies, worker-core}` → `worker` ; `verifier` → `ledger` → `server`
+**Crate dependency order:** `types` → `graph` → `verifier` → `worker-api` → `{strategies, worker-core}` → `worker` ; `{types, graph}` → `ledger` ; `{verifier, ledger}` → `server`
 
 | Crate | Purpose |
 |-------|---------|
@@ -71,6 +71,7 @@ K ≤ L canonical form enforced everywhere (R(K,L) = R(L,K)).
 |-----------|---------|
 | `MatrixView` | Canvas adjacency matrix with witness overlay |
 | `CircleLayout` | SVG circle graph (ORS-1.0) |
+| `GraphThumb` | Small canvas thumbnail of adjacency matrix |
 | `SubmitForm` | K/L/N inputs + RGXF paste + preview + submit |
 
 **Utils:** `rgxf.ts` (client-side RGXF decoder), `api.ts` (typed fetch wrappers).
@@ -79,7 +80,7 @@ K ≤ L canonical form enforced everywhere (R(K,L) = R(L,K)).
 
 | Route | Purpose |
 |-------|---------|
-| `/` | Homepage with health badge, nav cards, live event feed |
+| `/` | Homepage with health badge, nav cards |
 | `/leaderboards` | Browse by (K,L) pairs, drill into n values |
 | `/leaderboards/[k]/[l]/[n]` | Paginated ranked table with score columns, top graph viz, auto-refresh via polling |
 | `/submissions/[cid]` | Submission detail: verdict, witness, graph viz, rank |
