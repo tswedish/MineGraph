@@ -1,7 +1,7 @@
 use ramseynet_graph::RgxfJson;
 use serde::{Deserialize, Serialize};
 
-use crate::error::SearchError;
+use crate::error::WorkerError;
 
 /// Leaderboard graphs response from the server.
 #[derive(Debug, Deserialize)]
@@ -68,7 +68,7 @@ impl ServerClient {
         k: u32,
         ell: u32,
         n: u32,
-    ) -> Result<ThresholdResponse, SearchError> {
+    ) -> Result<ThresholdResponse, WorkerError> {
         let url = format!(
             "{}/api/leaderboards/{}/{}/{}/threshold",
             self.base_url, k, ell, n
@@ -78,7 +78,7 @@ impl ServerClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(SearchError::ServerError(format!("{status}: {body}")));
+            return Err(WorkerError::ServerError(format!("{status}: {body}")));
         }
 
         let info: ThresholdResponse = resp.json().await?;
@@ -93,7 +93,7 @@ impl ServerClient {
         n: u32,
         limit: u32,
         offset: u32,
-    ) -> Result<Vec<RgxfJson>, SearchError> {
+    ) -> Result<Vec<RgxfJson>, WorkerError> {
         let url = format!(
             "{}/api/leaderboards/{}/{}/{}/graphs?limit={}&offset={}",
             self.base_url, k, ell, n, limit, offset
@@ -103,29 +103,26 @@ impl ServerClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(SearchError::ServerError(format!("{status}: {body}")));
+            return Err(WorkerError::ServerError(format!("{status}: {body}")));
         }
 
         let body: LeaderboardGraphsResponse = resp.json().await?;
         Ok(body.graphs)
     }
 
-    /// Fetch leaderboard CIDs incrementally. If `since` is provided (ISO 8601),
-    /// only CIDs admitted after that timestamp are returned. If None, returns
-    /// all CIDs (initial sync).
+    /// Fetch leaderboard CIDs incrementally.
     pub async fn get_leaderboard_cids_since(
         &self,
         k: u32,
         ell: u32,
         n: u32,
         since: Option<&str>,
-    ) -> Result<CidsSyncResponse, SearchError> {
+    ) -> Result<CidsSyncResponse, WorkerError> {
         let mut url = format!(
             "{}/api/leaderboards/{}/{}/{}/cids",
             self.base_url, k, ell, n
         );
         if let Some(since) = since {
-            // Percent-encode the timestamp (colons, plus signs in ISO 8601)
             let encoded: String = since
                 .chars()
                 .map(|c| match c {
@@ -141,7 +138,7 @@ impl ServerClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(SearchError::ServerError(format!("{status}: {body}")));
+            return Err(WorkerError::ServerError(format!("{status}: {body}")));
         }
 
         let sync_resp: CidsSyncResponse = resp.json().await?;
@@ -155,7 +152,7 @@ impl ServerClient {
         ell: u32,
         n: u32,
         graph: RgxfJson,
-    ) -> Result<SubmitResponse, SearchError> {
+    ) -> Result<SubmitResponse, WorkerError> {
         let url = format!("{}/api/submit", self.base_url);
         let body = SubmitRequest { k, ell, n, graph };
 
@@ -164,7 +161,7 @@ impl ServerClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(SearchError::ServerError(format!("{status}: {body}")));
+            return Err(WorkerError::ServerError(format!("{status}: {body}")));
         }
 
         let submit_resp: SubmitResponse = resp.json().await?;

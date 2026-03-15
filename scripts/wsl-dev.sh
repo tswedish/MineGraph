@@ -82,7 +82,7 @@ case "$cmd" in
     ;;
   search)
     echo "=== Starting search worker ==="
-    cargo run -p ramseynet-search -- "$@"
+    cargo run -p ramseynet-worker -- "$@"
     ;;
   bench)
     echo "=== Running benchmarks ==="

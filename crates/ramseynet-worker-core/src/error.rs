@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum SearchError {
+pub enum WorkerError {
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
 

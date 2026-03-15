@@ -6,7 +6,10 @@ members = [
     "crates/ramseynet-verifier",
     "crates/ramseynet-ledger",
     "crates/ramseynet-server",
-    "crates/ramseynet-search",
+    "crates/ramseynet-worker-api",
+    "crates/ramseynet-worker-core",
+    "crates/ramseynet-strategies",
+    "crates/ramseynet-worker",
 ]
 
 [workspace.dependencies]

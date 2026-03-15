@@ -1470,26 +1470,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ramseynet-search"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "clap",
- "ramseynet-graph",
- "ramseynet-types",
- "ramseynet-verifier",
- "rand 0.8.5",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "ramseynet-server"
 version = "0.1.0"
 dependencies = [
@@ -1507,6 +1487,19 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ramseynet-strategies"
+version = "0.1.0"
+dependencies = [
+ "ramseynet-graph",
+ "ramseynet-types",
+ "ramseynet-verifier",
+ "ramseynet-worker-api",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1529,6 +1522,55 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "ramseynet-worker"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "ramseynet-graph",
+ "ramseynet-strategies",
+ "ramseynet-types",
+ "ramseynet-verifier",
+ "ramseynet-worker-api",
+ "ramseynet-worker-core",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "ramseynet-worker-api"
+version = "0.1.0"
+dependencies = [
+ "ramseynet-graph",
+ "ramseynet-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ramseynet-worker-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ramseynet-graph",
+ "ramseynet-types",
+ "ramseynet-verifier",
+ "ramseynet-worker-api",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -59,7 +59,7 @@ async fn ws_handler(
 async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
     // Send hello
     let hello = VizMessage::Hello {
-        version: crate::SEARCH_VERSION.to_string(),
+        version: crate::WORKER_VERSION.to_string(),
     };
     if send_json(&mut socket, &hello).await.is_err() {
         return;

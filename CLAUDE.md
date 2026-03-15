@@ -37,16 +37,19 @@ Options: `--strategy {greedy|local|annealing|tree|all}`, `--init {perturbed-pale
 
 Rust workspace (`crates/`) + SvelteKit 2 (`web/`).
 
-**Crate dependency order:** `types` → `graph` → `verifier` → `ledger` → `server` ← `search`
+**Crate dependency order:** `types` → `graph` → `verifier` → `worker-api` → `{strategies, worker-core}` → `worker` ; `verifier` → `ledger` → `server`
 
 | Crate | Purpose |
 |-------|---------|
 | `ramseynet-types` | Shared newtypes: GraphCid, RamseyParams, Verdict |
 | `ramseynet-graph` | RGXF encode/decode, AdjacencyMatrix, SHA-256 CID |
-| `ramseynet-verifier` | Clique/independent-set detection, 3-tier scoring, automorphism |
+| `ramseynet-verifier` | Clique/independent-set detection, 4-tier scoring, automorphism |
 | `ramseynet-ledger` | SQLite ledger: submissions, receipts, leaderboards, events |
 | `ramseynet-server` | Axum REST API, full submit lifecycle |
-| `ramseynet-search` | Standalone CLI: greedy, local search, simulated annealing, tree search |
+| `ramseynet-worker-api` | Search strategy trait, job/result schemas, observer interface |
+| `ramseynet-worker-core` | Worker engine: leaderboard sync, submission pipeline, init |
+| `ramseynet-strategies` | Search strategy implementations (tree/beam search) |
+| `ramseynet-worker` | CLI binary + worker web-app (visualization) |
 
 ## Leaderboard System
 

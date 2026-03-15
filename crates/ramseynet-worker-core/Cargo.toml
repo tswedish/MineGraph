@@ -1,26 +1,20 @@
 [package]
-name = "ramseynet-search"
+name = "ramseynet-worker-core"
 version = "0.1.0"
 edition = "2021"
-description = "Ramsey graph search heuristics and worker logic"
+description = "Worker platform core: engine, leaderboard sync, submission pipeline"
 license = "MIT"
 
-[[bin]]
-name = "ramseynet-search"
-path = "src/main.rs"
-
 [dependencies]
+ramseynet-worker-api = { path = "../ramseynet-worker-api" }
 ramseynet-types = { path = "../ramseynet-types" }
 ramseynet-graph = { path = "../ramseynet-graph" }
 ramseynet-verifier = { path = "../ramseynet-verifier" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-rand = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
 tokio = { workspace = true }
-clap = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 reqwest = { version = "0.12", features = ["json"] }
-axum = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+chrono = { workspace = true }

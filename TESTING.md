@@ -90,10 +90,13 @@ Click **"Browse leaderboards"** or the **Leaderboards** nav link.
 
 Click the **n=5** chip under R(3,3).
 
-- [ ] Header: `R(3,3) n = 5` with entry count
-- [ ] Ranked table with columns: #, CID, C_max, C_min, |Aut|, Admitted
-- [ ] Top graph visualization: Matrix View + Circle Layout
+- [ ] Header: `R(3,3) n = 5` with entry count (e.g., "Showing 1-50 of 500 entries")
+- [ ] Ranked table with columns: #, Graph, CID, C_max, C_min, Gap (Goodman), |Aut|, Admitted
+- [ ] Gap column: 0 values highlighted green
+- [ ] Top graph visualization: Matrix View + Circle Layout (only on page 1)
+- [ ] Pagination controls when total > 50 (first/prev/page numbers/next/last)
 - [ ] Click a CID → navigates to submission detail
+- [ ] CSV export button downloads current page data
 
 ### 3.4 Submission Detail (`/submissions/[cid]`)
 
@@ -107,6 +110,7 @@ Click a CID link on any leaderboard entry or event feed.
 - [ ] Rank badge shown when submission is on the leaderboard
 - [ ] Reason text (if rejected)
 - [ ] Witness vertices (if present)
+- [ ] **Score Details** section with grid: omega, alpha, C_omega, C_alpha, Triangles (G), Triangles (complement), Goodman #, Goodman minimum, Goodman gap (0 highlighted green), |Aut(G)|
 - [ ] Matrix View + Circle Layout side-by-side (with witness overlay for rejected graphs)
 - [ ] Submitted and Verified timestamps
 
@@ -165,11 +169,23 @@ curl -s localhost:3001/api/leaderboards | jq .
 # List n values for R(3,3)
 curl -s localhost:3001/api/leaderboards/3/3 | jq .
 
-# Full leaderboard for R(3,3) n=5
-curl -s localhost:3001/api/leaderboards/3/3/5 | jq .
+# Paginated leaderboard for R(3,3) n=5 (first page)
+curl -s 'localhost:3001/api/leaderboards/3/3/5?offset=0&limit=50' | jq .
+
+# Paginated leaderboard (page 2)
+curl -s 'localhost:3001/api/leaderboards/3/3/5?offset=50&limit=50' | jq .
 
 # Admission threshold
 curl -s localhost:3001/api/leaderboards/3/3/5/threshold | jq .
+
+# RGXF graphs for leaderboard entries (top 10)
+curl -s 'localhost:3001/api/leaderboards/3/3/5/graphs?limit=10' | jq .
+
+# Incremental CID sync (all CIDs)
+curl -s localhost:3001/api/leaderboards/3/3/5/cids | jq .
+
+# Incremental CID sync (only since a timestamp)
+curl -s 'localhost:3001/api/leaderboards/3/3/5/cids?since=2026-03-14T00:00:00Z' | jq .
 
 # Submission detail (replace CID with a real one from leaderboard)
 curl -s localhost:3001/api/submissions/<cid> | jq .
@@ -259,7 +275,24 @@ Expected: worker connects, searches for valid R(3,3) graphs on n=5 vertices, sub
 ./run search --k 4 --ell 4 --n 17 --strategy all
 ```
 
-### 7e. Offline mode
+### 7e. Leaderboard seeding and sampling
+
+```bash
+# Seed from leaderboard with moderate exploration (bias 0.3 = more uniform)
+./run search --k 4 --ell 4 --n 17 --init leaderboard --sample-bias 0.3
+
+# Seed from leaderboard with top-heavy sampling (bias 0.9 = mostly top graphs)
+./run search --k 4 --ell 4 --n 17 --init leaderboard --sample-bias 0.9
+
+# Larger seed pool with custom collector capacity
+./run search --k 4 --ell 4 --n 17 --init leaderboard --leaderboard-sample-size 200 --collector-capacity 2000
+```
+
+- [ ] Server logs show varied `offset=` values (not always 0) when `--sample-bias < 1.0`
+- [ ] Worker logs show `refreshed leaderboard seed pool count=N offset=M`
+- [ ] Worker logs show `synced leaderboard CIDs` with incremental `new_cids` after first round
+
+### 7f. Offline mode
 
 ```bash
 # No server needed — search with local viz only
@@ -268,7 +301,7 @@ Expected: worker connects, searches for valid R(3,3) graphs on n=5 vertices, sub
 
 Open http://localhost:8080 to see the search visualization dashboard.
 
-### 7f. Verify submissions appear in the UI
+### 7g. Verify submissions appear in the UI
 
 After running the search worker:
 - [ ] `/leaderboards/3/3/5` shows new entries in the ranked table
@@ -276,13 +309,13 @@ After running the search worker:
 - [ ] Submission detail pages load correctly for worker-submitted graphs
 - [ ] Leaderboard list at `/leaderboards` reflects updated entry counts
 
-### 7g. Graceful shutdown
+### 7h. Graceful shutdown
 
 1. Start: `./run search --k 3 --ell 3 --n 5`
 2. Press Ctrl+C
 3. Verify: Worker logs `Ctrl+C received, shutting down...` and exits cleanly
 
-### 7h. Error handling
+### 7i. Error handling
 
 ```bash
 # Server not running — should fail with connection error

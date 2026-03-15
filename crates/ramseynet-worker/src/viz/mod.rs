@@ -2,7 +2,7 @@
 //!
 //! When `--viz-port` is set, an axum server streams search snapshots
 //! to a browser over WebSocket at ~20fps. Valid graphs are scored and
-//! ranked in a top-N leaderboard (capacity 100, display limit selectable in UI).
+//! ranked in a top-N leaderboard (capacity 100 for local viz, display limit selectable in UI).
 
 pub mod server;
 
