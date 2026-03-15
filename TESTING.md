@@ -73,9 +73,6 @@ Open **http://localhost:5173** in your browser.
 - [ ] RamseyNet title renders with purple gradient
 - [ ] Green status badge shows `RamseyNet v0.1.0 — ok`
 - [ ] Two navigation cards: Leaderboards, Submit
-- [ ] Live Events panel shows a green connection dot
-- [ ] Events from the seed script appear (graph.submitted, graph.verified, leaderboard.admitted)
-- [ ] Events with CIDs are clickable links to submission detail pages
 - [ ] No favicon 404 in the network tab (SVG K5 favicon loads)
 
 ### 3.2 Leaderboards (`/leaderboards`)
@@ -148,13 +145,6 @@ Click the **Submit** nav link.
 - [ ] Browser back/forward works (SPA routing)
 - [ ] Direct URL access works (e.g., `/leaderboards/3/3/5`)
 
-### 3.7 WebSocket Reconnect
-
-1. Stop the API server (Ctrl+C)
-2. Verify: Connection dot turns red
-3. Restart: `./run server-log`
-4. Verify: Dot turns green within a few seconds
-
 ---
 
 ## 4. API Testing with curl
@@ -200,8 +190,6 @@ curl -s -X POST localhost:3001/api/submit \
   -H "Content-Type: application/json" \
   -d '{"k":4,"ell":4,"n":5,"graph":{"n":5,"encoding":"utri_b64_v1","bits_b64":"mUA="}}' | jq .
 
-# WebSocket event stream (requires wscat: npm install -g wscat)
-wscat -c ws://localhost:3001/api/events
 ```
 
 ---
@@ -244,7 +232,7 @@ Start the API server and seed data (sections 2b + 2d above).
 ### 7b. Basic run
 
 ```bash
-./run search --k 3 --ell 3 --n 5 --strategy greedy --max-iters 1000
+./run search --k 3 --ell 3 --n 5 --strategy tree --max-iters 1000
 ```
 
 Expected: worker connects, searches for valid R(3,3) graphs on n=5 vertices, submits competitive graphs to the leaderboard, and reports admission results. Press Ctrl+C to stop.
@@ -252,16 +240,10 @@ Expected: worker connects, searches for valid R(3,3) graphs on n=5 vertices, sub
 ### 7c. Strategy-specific runs
 
 ```bash
-# Local search with tabu
-./run search --k 3 --ell 3 --n 5 --strategy local --max-iters 10000
-
-# Simulated annealing
-./run search --k 3 --ell 3 --n 5 --strategy annealing --max-iters 50000
-
-# Tree search (beam search)
+# Tree search (beam search) — the only current strategy
 ./run search --k 3 --ell 3 --n 5 --strategy tree
 
-# All strategies (default)
+# All strategies (default — currently just tree)
 ./run search --k 3 --ell 3 --n 5
 ```
 
@@ -269,10 +251,10 @@ Expected: worker connects, searches for valid R(3,3) graphs on n=5 vertices, sub
 
 ```bash
 # R(3,4) n=8 — Wagner graph is the classic solution
-./run search --k 3 --ell 4 --n 8 --strategy greedy
+./run search --k 3 --ell 4 --n 8 --strategy tree
 
 # R(4,4) n=17 — Paley graph is the classic solution
-./run search --k 4 --ell 4 --n 17 --strategy all
+./run search --k 4 --ell 4 --n 17
 ```
 
 ### 7e. Leaderboard seeding and sampling
@@ -305,7 +287,6 @@ Open http://localhost:8080 to see the search visualization dashboard.
 
 After running the search worker:
 - [ ] `/leaderboards/3/3/5` shows new entries in the ranked table
-- [ ] Event feed on homepage shows `graph.submitted` and `leaderboard.admitted` events
 - [ ] Submission detail pages load correctly for worker-submitted graphs
 - [ ] Leaderboard list at `/leaderboards` reflects updated entry counts
 
@@ -321,7 +302,7 @@ After running the search worker:
 # Server not running — should fail with connection error
 ./run search --k 3 --ell 3 --n 5 --server http://localhost:9999
 
-# K and L are required
+# Partial params — should fail (need all three or none)
 ./run search --k 3 --n 5  # should fail with missing --ell
 ```
 
@@ -332,5 +313,4 @@ After running the search worker:
 - No authentication or signing (Phase 6)
 - No P2P networking (Phase 6)
 - Database is local SQLite — persists across restarts but is per-environment
-- WebSocket close/reconnect messages in browser console on server restart are expected
 - Search worker has no identity — all submissions are anonymous until Phase 6

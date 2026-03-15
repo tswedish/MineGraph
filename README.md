@@ -42,7 +42,7 @@ See **[TESTING.md](TESTING.md)** for a full interactive walkthrough.
 ./run web-dev     # Web dev server (:5173)
 ./run server      # API server (:3001)
 ./run server-log  # API server with file logging
-./run search      # Search worker (--k, --ell, --n required)
+./run search      # Search worker (--k, --ell, --n for auto-start; omit for idle mode)
 ./run bench       # Criterion benchmarks (verifier/scoring)
 ./run seed        # Seed test data
 ```
@@ -51,12 +51,12 @@ See **[TESTING.md](TESTING.md)** for a full interactive walkthrough.
 
 ```
 ./run search --k 3 --ell 3 --n 5                     # all strategies, default server
-./run search --k 3 --ell 3 --n 5 --strategy greedy
+./run search --k 3 --ell 3 --n 5 --strategy tree
 ./run search --k 4 --ell 4 --n 17 --offline --port 8080  # no server needed
 ./run search --k 5 --ell 5 --n 25 --init leaderboard --sample-bias 0.3
 ```
 
-Options: `--strategy {tree|all}`, `--init {perturbed-paley|paley|random|leaderboard}`, `--noise-flips N`, `--max-iters N`, `--beam-width N`, `--max-depth N`, `--port PORT`, `--offline`, `--no-backoff`, `--sample-bias F`, `--leaderboard-sample-size N`, `--collector-capacity N`.
+Options: `--strategy {tree|evo|all}`, `--init {perturbed-paley|paley|random|leaderboard}`, `--noise-flips N`, `--max-iters N`, `--beam-width N`, `--max-depth N`, `--port PORT`, `--offline`, `--no-backoff`, `--sample-bias F`, `--leaderboard-sample-size N`, `--collector-capacity N`, `--max-known-cids N`.
 
 ## Project Structure
 
@@ -66,10 +66,10 @@ crates/
   ramseynet-graph/        RGXF graph encoding + SHA-256 content addressing
   ramseynet-verifier/     Ramsey verifier (clique detection, 4-tier scoring, automorphism)
   ramseynet-ledger/       SQLite ledger (submissions, leaderboards, events)
-  ramseynet-server/       Axum HTTP/WebSocket server
+  ramseynet-server/       Axum HTTP server
   ramseynet-worker-api/   Search strategy trait + job/result schemas
   ramseynet-worker-core/  Worker engine: leaderboard sync, submission, init
-  ramseynet-strategies/   Search strategy implementations (tree/beam search)
+  ramseynet-strategies/   Search strategy implementations (tree/beam, evolutionary SA)
   ramseynet-worker/       CLI binary + worker web-app (visualization)
 web/                      SvelteKit 2 / Svelte 5 frontend (server web-app)
 test-vectors/             Shared test data (small_graphs.json)
@@ -92,12 +92,11 @@ K ≤ L canonical form enforced everywhere (R(K,L) = R(L,K)).
 
 The SvelteKit frontend provides:
 
-- **Homepage** — Server health badge, navigation cards, live event feed
+- **Homepage** — Server health badge, navigation cards
 - **Leaderboards** (`/leaderboards`) — Browse by (K,L) pair, drill into n values
 - **Leaderboard Detail** (`/leaderboards/[k]/[l]/[n]`) — Paginated ranked table with score columns (C_max, C_min, Goodman gap, |Aut|), top graph visualization, auto-refresh via polling, CSV export
 - **Submission Detail** (`/submissions/[cid]`) — Full graph details: verdict, witness, rank, score breakdown (including Goodman number/gap/minimum), matrix + circle visualization
 - **Submit** (`/submit`) — Enter K/L/N, paste RGXF JSON, see live matrix preview, submit for verification
-- **Live Events** — Real-time OESP-1 WebSocket event stream with auto-reconnect
 
 ### Graph Visualization
 
@@ -120,7 +119,6 @@ Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
 | `/api/submissions/{cid}` | GET | Submission detail: graph, receipt, rank |
 | `/api/verify` | POST | Stateless graph verification |
 | `/api/submit` | POST | Full lifecycle: verify + store + leaderboard admit |
-| `/api/events` | WS | OESP-1 event stream |
 
 ### Submit Request/Response
 
@@ -135,7 +133,6 @@ Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
 
 - **RGXF**: Packed upper-triangular adjacency bitstring, SHA-256 content addressed
 - **OVWC-1**: Verifier contract — JSON stdin/stdout, exit 0
-- **OESP-1**: WebSocket event stream with monotonic sequence numbers
 
 ## Phase Status
 
@@ -144,9 +141,9 @@ Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
 | 0 — Scaffolding | Complete | Workspace, SvelteKit skeleton, CI |
 | 1 — Graph Library | Complete | RGXF, AdjacencyMatrix, CID |
 | 2 — Verifier | Complete | Clique detection, OVWC-1 WASM |
-| 3 — Server + Ledger | Complete | Axum API, SQLite, WebSocket events |
+| 3 — Server + Ledger | Complete | Axum API, SQLite |
 | 4 — Web Application | Complete | Full interactive frontend |
-| 5 — Search Worker | Complete | Greedy, local, SA, tree search |
+| 5 — Search Worker | Complete | Tree/beam search, evolutionary SA |
 | 5.5 — Leaderboard | Complete | 4-tier scoring (Goodman gap), 10k-cap leaderboards, pagination |
 | 6 — P2P Networking | Pending | ed25519 identity, libp2p, duels |
 
