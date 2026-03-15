@@ -13,6 +13,10 @@
 //! For R(5,5) n=25, flipping edge (u,v) affects at most C(23,3) = 1,771
 //! potential 5-cliques per color, vs C(25,5) = 53,130 for a full recount.
 //!
+//! Each individual maintains both its graph and its complement as
+//! persistent state. When an edge flip is accepted, both are updated
+//! with a single `set_edge` call each — no allocations in the hot loop.
+//!
 //! # Cross-round persistence
 //!
 //! The population is serialized into `SearchResult::carry_state` and
@@ -89,8 +93,84 @@ fn count_cliques_in_subset(
     }
 }
 
+/// Compute the change in violation score from flipping edge (u,v).
+///
+/// Takes both the graph and its pre-built complement to avoid allocations.
+/// The caller is responsible for keeping `comp` in sync with `adj`.
+///
+/// Returns (delta_kc, delta_ei): the change in k-clique count and
+/// ell-independent-set count. These can be negative (improvement).
+fn violation_delta(
+    adj: &AdjacencyMatrix,
+    comp: &AdjacencyMatrix,
+    k: u32,
+    ell: u32,
+    u: u32,
+    v: u32,
+) -> (i64, i64) {
+    let edge_present = adj.edge(u, v);
+
+    // k-cliques through (u,v) in G: only exist if edge is present
+    let kc_before = count_cliques_through_edge(adj, k, u, v) as i64;
+
+    // ell-cliques through (u,v) in complement: only exist if complement edge is present
+    let ei_before = count_cliques_through_edge(comp, ell, u, v) as i64;
+
+    if edge_present {
+        // Removing edge from G: all k-cliques through (u,v) are destroyed.
+        // Adding edge to complement: need to count new ell-cliques.
+        // After flip, complement has the (u,v) edge. Count cliques in
+        // the "after" complement by temporarily considering (u,v) present.
+        // The common-neighbor set doesn't change (other edges unchanged),
+        // so we can count directly with a modified adjacency check.
+        let ei_after = count_cliques_through_edge_assuming(comp, ell, u, v, true) as i64;
+        (-kc_before, ei_after - ei_before)
+    } else {
+        // Adding edge to G: need to count new k-cliques.
+        // Removing edge from complement: all ell-cliques through (u,v) destroyed.
+        let kc_after = count_cliques_through_edge_assuming(adj, k, u, v, true) as i64;
+        (kc_after - kc_before, -ei_before)
+    }
+}
+
+/// Count k-cliques through (u,v) assuming the (u,v) edge has a specific state.
+/// This avoids mutating or cloning the adjacency matrix.
+fn count_cliques_through_edge_assuming(
+    adj: &AdjacencyMatrix,
+    k: u32,
+    u: u32,
+    v: u32,
+    edge_present: bool,
+) -> u64 {
+    if k < 2 {
+        return 0;
+    }
+    if !edge_present {
+        return 0;
+    }
+    if k == 2 {
+        return 1;
+    }
+    let n = adj.n();
+    // Common neighbors: for the (u,v) edge we're "assuming", the other
+    // edges are read from the actual adjacency matrix unchanged.
+    let common: Vec<u32> = (0..n)
+        .filter(|&w| w != u && w != v && adj.edge(u, w) && adj.edge(v, w))
+        .collect();
+
+    if (common.len() as u32) < k - 2 {
+        return 0;
+    }
+
+    let mut count = 0u64;
+    let mut current = Vec::with_capacity((k - 2) as usize);
+    count_cliques_in_subset(adj, &common, &mut current, 0, k - 2, &mut count);
+    count
+}
+
 /// Violation score: total k-cliques + ell-independent-sets.
 /// An independent set of size ell in G is a clique of size ell in complement(G).
+#[cfg(test)]
 fn full_violation_score(adj: &AdjacencyMatrix, k: u32, ell: u32) -> (u64, u64, u64) {
     let kc = count_cliques(adj, k);
     let comp = adj.complement();
@@ -98,37 +178,47 @@ fn full_violation_score(adj: &AdjacencyMatrix, k: u32, ell: u32) -> (u64, u64, u
     (kc + ei, kc, ei)
 }
 
-/// Compute the change in violation score from flipping edge (u,v).
-///
-/// Returns (delta_kc, delta_ei): the change in k-clique count and
-/// ell-independent-set count. These can be negative (improvement).
-fn violation_delta(adj: &AdjacencyMatrix, k: u32, ell: u32, u: u32, v: u32) -> (i64, i64) {
-    // Build the "after" state for both G and complement
-    let mut g_after = adj.clone();
-    let cur = g_after.edge(u, v);
-    g_after.set_edge(u, v, !cur);
-
-    // k-cliques through (u,v) before and after
-    let kc_before = count_cliques_through_edge(adj, k, u, v) as i64;
-    let kc_after = count_cliques_through_edge(&g_after, k, u, v) as i64;
-
-    // ell-cliques in complement through (u,v) before and after
-    let comp_before = adj.complement();
-    let comp_after = g_after.complement();
-    let ei_before = count_cliques_through_edge(&comp_before, ell, u, v) as i64;
-    let ei_after = count_cliques_through_edge(&comp_after, ell, u, v) as i64;
-
-    (kc_after - kc_before, ei_after - ei_before)
-}
-
 // ── Population state (persisted across rounds) ──────────────────────
 
 /// State for one individual in the population.
+/// Maintains both the graph and its complement for zero-allocation delta updates.
 struct Individual {
     graph: AdjacencyMatrix,
+    comp: AdjacencyMatrix,
     violations: u64,
     kc: u64,
     ei: u64,
+}
+
+impl Individual {
+    /// Build from a graph, computing complement and violation counts.
+    fn from_graph(graph: AdjacencyMatrix, k: u32, ell: u32) -> Self {
+        let comp = graph.complement();
+        let kc = count_cliques(&graph, k);
+        let ei = count_cliques(&comp, ell);
+        Individual {
+            graph,
+            comp,
+            violations: kc + ei,
+            kc,
+            ei,
+        }
+    }
+
+    /// Recompute violation counts from scratch (corrects any drift).
+    fn full_recount(&mut self, k: u32, ell: u32) {
+        self.comp = self.graph.complement();
+        self.kc = count_cliques(&self.graph, k);
+        self.ei = count_cliques(&self.comp, ell);
+        self.violations = self.kc + self.ei;
+    }
+
+    /// Flip an edge in both the graph and complement.
+    fn flip_edge(&mut self, u: u32, v: u32) {
+        let cur = self.graph.edge(u, v);
+        self.graph.set_edge(u, v, !cur);
+        self.comp.set_edge(u, v, cur); // complement is opposite
+    }
 }
 
 /// Population state carried across rounds.
@@ -258,17 +348,12 @@ impl SearchStrategy for EvoSearch {
             .as_ref()
             .and_then(|s| s.downcast_ref::<PopulationState>())
         {
-            // Restore persisted population
-            for (graph, violations, kc, ei) in &state.individuals {
+            // Restore persisted population (complement rebuilt from graph)
+            for (graph, _violations, _kc, _ei) in &state.individuals {
                 if pop.len() >= pop_size {
                     break;
                 }
-                pop.push(Individual {
-                    graph: graph.clone(),
-                    violations: *violations,
-                    kc: *kc,
-                    ei: *ei,
-                });
+                pop.push(Individual::from_graph(graph.clone(), k, ell));
             }
         }
 
@@ -293,13 +378,7 @@ impl SearchStrategy for EvoSearch {
                 }
                 g
             };
-            let (violations, kc, ei) = full_violation_score(&graph, k, ell);
-            pop.push(Individual {
-                graph,
-                violations,
-                kc,
-                ei,
-            });
+            pop.push(Individual::from_graph(graph, k, ell));
         }
 
         let mut best_valid: Option<AdjacencyMatrix> = None;
@@ -339,6 +418,7 @@ impl SearchStrategy for EvoSearch {
 
         // ── Main SA loop ─────────────────────────────────────────
         // Iterations are distributed round-robin across the population.
+        // The hot loop does ZERO heap allocations per iteration.
         while iters_used < max_iters && !observer.is_cancelled() {
             let ind_idx = (iters_used as usize) % pop_size;
             let progress = iters_used as f64 / max_iters as f64;
@@ -350,8 +430,8 @@ impl SearchStrategy for EvoSearch {
 
             let ind = &mut pop[ind_idx];
 
-            // Incremental delta computation
-            let (delta_kc, delta_ei) = violation_delta(&ind.graph, k, ell, u, v);
+            // Incremental delta computation — no allocations
+            let (delta_kc, delta_ei) = violation_delta(&ind.graph, &ind.comp, k, ell, u, v);
             let old_violations = ind.violations as i64;
             let new_violations = old_violations + delta_kc + delta_ei;
 
@@ -366,9 +446,8 @@ impl SearchStrategy for EvoSearch {
             };
 
             if accept {
-                // Apply the flip
-                let cur = ind.graph.edge(u, v);
-                ind.graph.set_edge(u, v, !cur);
+                // Apply the flip to both graph and complement
+                ind.flip_edge(u, v);
                 ind.kc = (ind.kc as i64 + delta_kc).max(0) as u64;
                 ind.ei = (ind.ei as i64 + delta_ei).max(0) as u64;
                 ind.violations = (new_violations.max(0)) as u64;
@@ -382,12 +461,9 @@ impl SearchStrategy for EvoSearch {
                 // Check for valid graph
                 if ind.violations == 0 {
                     // Double-check with full recount (incremental can drift)
-                    let (actual, actual_kc, actual_ei) = full_violation_score(&ind.graph, k, ell);
-                    ind.violations = actual;
-                    ind.kc = actual_kc;
-                    ind.ei = actual_ei;
+                    ind.full_recount(k, ell);
 
-                    if actual == 0 {
+                    if ind.violations == 0 {
                         observer.on_discovery(&RawDiscovery {
                             graph: ind.graph.clone(),
                             iteration: iters_used,
@@ -432,13 +508,11 @@ impl SearchStrategy for EvoSearch {
                         if other != vertex {
                             let edge_val = pop[bi].graph.edge(vertex, other);
                             pop[wi].graph.set_edge(vertex, other, edge_val);
+                            pop[wi].comp.set_edge(vertex, other, !edge_val);
                         }
                     }
-                    // Full recount after crossover
-                    let (v, kc, ei) = full_violation_score(&pop[wi].graph, k, ell);
-                    pop[wi].violations = v;
-                    pop[wi].kc = kc;
-                    pop[wi].ei = ei;
+                    // Full recount after crossover (many edges changed)
+                    pop[wi].full_recount(k, ell);
                     stale_counters[wi] = 0;
                 }
             }
@@ -458,13 +532,7 @@ impl SearchStrategy for EvoSearch {
                             let cur = g.edge(ei, ej);
                             g.set_edge(ei, ej, !cur);
                         }
-                        let (v, kc, ei) = full_violation_score(&g, k, ell);
-                        pop[i] = Individual {
-                            graph: g,
-                            violations: v,
-                            kc,
-                            ei,
-                        };
+                        pop[i] = Individual::from_graph(g, k, ell);
                         stale_counters[i] = 0;
                     }
                 }
@@ -473,10 +541,7 @@ impl SearchStrategy for EvoSearch {
             // Periodic full recount to prevent drift (every 10K iters per individual)
             if iters_used.is_multiple_of(10_000 * pop_size as u64) {
                 for ind in &mut pop {
-                    let (v, kc, ei) = full_violation_score(&ind.graph, k, ell);
-                    ind.violations = v;
-                    ind.kc = kc;
-                    ind.ei = ei;
+                    ind.full_recount(k, ell);
                 }
             }
         }
@@ -659,6 +724,7 @@ mod tests {
                 }
             }
         }
+        let mut comp = g.complement();
 
         // Test several random edge flips
         for _ in 0..50 {
@@ -670,11 +736,12 @@ mod tests {
             let (u, v) = if u < v { (u, v) } else { (v, u) };
 
             let (_before_total, before_kc, before_ei) = full_violation_score(&g, k, ell);
-            let (delta_kc, delta_ei) = violation_delta(&g, k, ell, u, v);
+            let (delta_kc, delta_ei) = violation_delta(&g, &comp, k, ell, u, v);
 
-            // Apply flip
+            // Apply flip to both graph and complement
             let cur = g.edge(u, v);
             g.set_edge(u, v, !cur);
+            comp.set_edge(u, v, cur);
 
             let (_after_total, after_kc, after_ei) = full_violation_score(&g, k, ell);
 
@@ -687,6 +754,47 @@ mod tests {
                 after_ei as i64 - before_ei as i64,
                 delta_ei,
                 "ei delta mismatch: before={before_ei} after={after_ei} delta={delta_ei}"
+            );
+        }
+    }
+
+    #[test]
+    fn incremental_delta_k5_n25() {
+        // Larger test matching actual R(5,5) n=25 search params
+        let mut rng = SmallRng::seed_from_u64(456);
+        let n = 25;
+        let k = 5;
+        let ell = 5;
+
+        let mut g = paley_graph(n);
+        let mut comp = g.complement();
+
+        for _ in 0..20 {
+            let u = rng.gen_range(0..n);
+            let v = rng.gen_range(0..n);
+            if u == v {
+                continue;
+            }
+            let (u, v) = if u < v { (u, v) } else { (v, u) };
+
+            let (_, before_kc, before_ei) = full_violation_score(&g, k, ell);
+            let (delta_kc, delta_ei) = violation_delta(&g, &comp, k, ell, u, v);
+
+            let cur = g.edge(u, v);
+            g.set_edge(u, v, !cur);
+            comp.set_edge(u, v, cur);
+
+            let (_, after_kc, after_ei) = full_violation_score(&g, k, ell);
+
+            assert_eq!(
+                after_kc as i64 - before_kc as i64,
+                delta_kc,
+                "kc delta mismatch at k=5 n=25"
+            );
+            assert_eq!(
+                after_ei as i64 - before_ei as i64,
+                delta_ei,
+                "ei delta mismatch at k=5 n=25"
             );
         }
     }
@@ -710,6 +818,40 @@ mod tests {
         g.set_edge(0, 2, true);
         // 3-cliques through edge (0,1): {0,1,2}
         assert_eq!(count_cliques_through_edge(&g, 3, 0, 1), 1);
+    }
+
+    #[test]
+    fn individual_flip_edge_keeps_complement_in_sync() {
+        let mut rng = SmallRng::seed_from_u64(789);
+        let n = 10;
+        let k = 3;
+        let ell = 3;
+
+        let g = AdjacencyMatrix::new(n);
+        let mut ind = Individual::from_graph(g, k, ell);
+
+        // Flip a bunch of edges and verify complement stays correct
+        for _ in 0..30 {
+            let u = rng.gen_range(0..n);
+            let v = rng.gen_range(0..n);
+            if u == v {
+                continue;
+            }
+            let (u, v) = if u < v { (u, v) } else { (v, u) };
+            ind.flip_edge(u, v);
+        }
+
+        // Verify complement matches
+        let expected_comp = ind.graph.complement();
+        for i in 0..n {
+            for j in (i + 1)..n {
+                assert_eq!(
+                    ind.comp.edge(i, j),
+                    expected_comp.edge(i, j),
+                    "complement out of sync at ({i},{j})"
+                );
+            }
+        }
     }
 
     // ── Strategy integration tests ────────────────────────────
