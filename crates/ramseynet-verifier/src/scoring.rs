@@ -188,7 +188,9 @@ pub fn goodman_minimum(n: u32) -> u64 {
     }
     let n = n as u64;
     let c_n_3 = n * (n - 1) * (n - 2) / 6;
-    let floor_term = (n / 2) * ((n - 1) * (n - 1) / 4);
+    // Minimum is achieved when all vertex degrees equal floor((n-1)/2).
+    // floor_term = floor(n * floor((n-1)^2 / 4) / 2)
+    let floor_term = n * ((n - 1) * (n - 1) / 4) / 2;
     c_n_3 - floor_term
 }
 
@@ -258,8 +260,8 @@ mod tests {
         assert_eq!(score.triangles, 10);
         assert_eq!(score.triangles_complement, 0);
         assert_eq!(score.goodman, 10);
-        // g(5) = 2, gap = 10 - 2 = 8
-        assert_eq!(score.goodman_gap, 8);
+        // g(5) = 0, gap = 10 - 0 = 10
+        assert_eq!(score.goodman_gap, 10);
     }
 
     /// Lower tier1 wins regardless of other tiers.
@@ -314,13 +316,19 @@ mod tests {
         assert_eq!(goodman_minimum(2), 0);
         assert_eq!(goodman_minimum(3), 0); // C(3,3)=1, floor(3/2)*floor(4/4)=1*1=1, 1-1=0
         assert_eq!(goodman_minimum(4), 0); // C(4,3)=4, floor(4/2)*floor(9/4)=2*2=4, 4-4=0
-        assert_eq!(goodman_minimum(5), 2); // C(5,3)=10, floor(5/2)*floor(16/4)=2*4=8, 10-8=2
-        assert_eq!(goodman_minimum(6), 2); // C(6,3)=20, floor(6/2)*floor(25/4)=3*6=18, 20-18=2
+        assert_eq!(goodman_minimum(5), 0); // C(5,3)=10, 5*16/4/2=10, 10-10=0
+        assert_eq!(goodman_minimum(6), 2); // C(6,3)=20, 6*25/4/2=6*6/2=18, 20-18=2
     }
 
     #[test]
     fn goodman_minimum_n6() {
-        // C(6,3) = 20, floor(6/2) = 3, (6-1)^2 = 25, floor(25/4) = 6, 3*6 = 18, 20-18 = 2
+        // C(6,3)=20, 6*(5^2)/4/2 = 6*6/2 = 18, 20-18 = 2
         assert_eq!(goodman_minimum(6), 2);
+    }
+
+    #[test]
+    fn goodman_minimum_n25() {
+        // C(25,3)=2300, 25*(24^2)/4/2 = 25*144/2 = 1800, 2300-1800 = 500
+        assert_eq!(goodman_minimum(25), 500);
     }
 }
