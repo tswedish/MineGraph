@@ -288,7 +288,7 @@ impl SearchStrategy for EvoSearch {
                     min: 0,
                     max: 1_000_000,
                 },
-                default: serde_json::json!(50000),
+                default: serde_json::json!(10000),
             },
         ]
     }
@@ -318,7 +318,7 @@ impl SearchStrategy for EvoSearch {
             .config
             .get("restart_stale")
             .and_then(|v| v.as_u64())
-            .unwrap_or(50000);
+            .unwrap_or(10000);
 
         let n = job.n;
         let k = job.k;
@@ -358,6 +358,7 @@ impl SearchStrategy for EvoSearch {
         }
 
         // Fill remaining slots with the seed graph (with perturbation for diversity)
+        let restored_from_carry = !pop.is_empty();
         while pop.len() < pop_size {
             let graph = if pop.is_empty() {
                 // First individual: use seed graph directly
@@ -379,6 +380,32 @@ impl SearchStrategy for EvoSearch {
                 g
             };
             pop.push(Individual::from_graph(graph, k, ell));
+        }
+
+        // ── Leaderboard immigrant injection ──────────────────────
+        // If we restored a full population from carry_state, the engine's
+        // init_graph (which may be a fresh leaderboard sample) was ignored.
+        // Inject it as an "immigrant" if it's competitive with the population,
+        // replacing the worst individual. This keeps the population connected
+        // to the leaderboard's evolving state.
+        if restored_from_carry && pop_size > 1 {
+            if let Some(ref immigrant_graph) = job.init_graph {
+                let immigrant = Individual::from_graph(immigrant_graph.clone(), k, ell);
+
+                // Compute population median violations
+                let mut violation_counts: Vec<u64> = pop.iter().map(|ind| ind.violations).collect();
+                violation_counts.sort_unstable();
+                let median = violation_counts[violation_counts.len() / 2];
+
+                // Only inject if the immigrant is at most as bad as the median.
+                // This adds diversity without pulling the population backward.
+                if immigrant.violations <= median {
+                    let wi = worst_individual(&pop);
+                    if immigrant.violations < pop[wi].violations {
+                        pop[wi] = immigrant;
+                    }
+                }
+            }
         }
 
         let mut best_valid: Option<AdjacencyMatrix> = None;
