@@ -192,6 +192,7 @@ async fn main() -> Result<()> {
             None
         },
         leaderboard_sample_size: cli.leaderboard_sample_size,
+        sample_bias: cli.sample_bias,
         collector_capacity: cli.collector_capacity,
     };
 

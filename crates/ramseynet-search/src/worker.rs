@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rand::rngs::SmallRng;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use ramseynet_graph::{compute_cid, rgxf, AdjacencyMatrix};
 use ramseynet_types::GraphCid;
 use ramseynet_verifier::scoring::{compute_score_canonical, GraphScore};
@@ -101,6 +101,11 @@ pub struct WorkerConfig {
     pub leaderboard_pool: Option<Arc<Mutex<Vec<AdjacencyMatrix>>>>,
     /// How many graphs to fetch from the server for leaderboard seed pool.
     pub leaderboard_sample_size: u32,
+    /// Sampling bias for leaderboard init: 0.0 = uniform across entire
+    /// leaderboard, 1.0 = always fetch from the top. Controls both which
+    /// region of the leaderboard to fetch from (offset) and which graph
+    /// within the fetched pool to select.
+    pub sample_bias: f64,
     /// Per-strategy discovery buffer capacity.
     pub collector_capacity: usize,
 }
@@ -215,6 +220,13 @@ pub async fn run_worker(
     // timestamp to fetch only newly admitted CIDs.
     let mut cid_sync_cursor: Option<String> = None;
 
+    // RNG for pool offset sampling (separate from search RNG to avoid
+    // coupling search reproducibility with network behavior).
+    let mut pool_rng = SmallRng::from_entropy();
+
+    // Tracks the total leaderboard size from the last threshold fetch.
+    let mut leaderboard_total: u32 = 0;
+
     loop {
         // Check shutdown
         if *shutdown.borrow() {
@@ -232,6 +244,7 @@ pub async fn run_worker(
                     worst_t1 = ?resp.worst_tier1_max,
                     "fetched leaderboard threshold"
                 );
+                leaderboard_total = resp.entry_count;
                 threshold = AdmissionThreshold::from_response(&resp);
             }
             Err(e) => {
@@ -265,8 +278,27 @@ pub async fn run_worker(
 
         // Refresh leaderboard pool if using leaderboard init
         if let Some(ref pool) = config.leaderboard_pool {
+            // Compute a biased random offset into the leaderboard.
+            // bias=1.0 → always offset=0 (top graphs only)
+            // bias=0.0 → uniform random offset across entire leaderboard
+            let total = threshold
+                .worst_score
+                .as_ref()
+                .map(|_| leaderboard_total)
+                .unwrap_or(leaderboard_total);
+            let max_offset = total.saturating_sub(config.leaderboard_sample_size);
+            let offset = if max_offset == 0 || config.sample_bias >= 1.0 {
+                0
+            } else {
+                // Exponential weighting: sample an offset from 0..max_offset
+                // with bias toward 0. Higher bias = more likely to pick offset=0.
+                let u: f64 = pool_rng.gen();
+                let biased = u.powf(1.0 / (1.0 - config.sample_bias * 0.95));
+                (biased * max_offset as f64) as u32
+            };
+
             match client
-                .get_leaderboard_graphs(k, ell, target_n, config.leaderboard_sample_size)
+                .get_leaderboard_graphs(k, ell, target_n, config.leaderboard_sample_size, offset)
                 .await
             {
                 Ok(rgxfs) => {
@@ -276,7 +308,7 @@ pub async fn run_worker(
                         .collect();
                     let count = graphs.len();
                     *pool.lock().unwrap() = graphs;
-                    info!(count, "refreshed leaderboard seed pool");
+                    info!(count, offset, "refreshed leaderboard seed pool");
                 }
                 Err(e) => {
                     warn!("failed to fetch leaderboard graphs: {e}");

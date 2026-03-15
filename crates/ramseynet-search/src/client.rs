@@ -85,17 +85,18 @@ impl ServerClient {
         Ok(info)
     }
 
-    /// Fetch RGXF graphs from a leaderboard (top `limit` entries).
+    /// Fetch RGXF graphs from a leaderboard with pagination.
     pub async fn get_leaderboard_graphs(
         &self,
         k: u32,
         ell: u32,
         n: u32,
         limit: u32,
+        offset: u32,
     ) -> Result<Vec<RgxfJson>, SearchError> {
         let url = format!(
-            "{}/api/leaderboards/{}/{}/{}/graphs?limit={}",
-            self.base_url, k, ell, n, limit
+            "{}/api/leaderboards/{}/{}/{}/graphs?limit={}&offset={}",
+            self.base_url, k, ell, n, limit, offset
         );
         let resp = self.client.get(&url).send().await?;
 
