@@ -20,6 +20,14 @@ pub struct ThresholdResponse {
     pub worst_tier3_cid: Option<String>,
 }
 
+/// Incremental CID sync response from the server.
+#[derive(Debug, Deserialize)]
+pub struct CidsSyncResponse {
+    pub total: u32,
+    pub cids: Vec<String>,
+    pub last_updated: Option<String>,
+}
+
 /// Submit response from the server.
 #[derive(Debug, Deserialize)]
 pub struct SubmitResponse {
@@ -100,17 +108,32 @@ impl ServerClient {
         Ok(body.graphs)
     }
 
-    /// Fetch leaderboard entry CIDs for local cache.
-    pub async fn get_leaderboard_cids(
+    /// Fetch leaderboard CIDs incrementally. If `since` is provided (ISO 8601),
+    /// only CIDs admitted after that timestamp are returned. If None, returns
+    /// all CIDs (initial sync).
+    pub async fn get_leaderboard_cids_since(
         &self,
         k: u32,
         ell: u32,
         n: u32,
-    ) -> Result<Vec<String>, SearchError> {
-        let url = format!(
-            "{}/api/leaderboards/{}/{}/{}",
+        since: Option<&str>,
+    ) -> Result<CidsSyncResponse, SearchError> {
+        let mut url = format!(
+            "{}/api/leaderboards/{}/{}/{}/cids",
             self.base_url, k, ell, n
         );
+        if let Some(since) = since {
+            // Percent-encode the timestamp (colons, plus signs in ISO 8601)
+            let encoded: String = since
+                .chars()
+                .map(|c| match c {
+                    ':' => "%3A".to_string(),
+                    '+' => "%2B".to_string(),
+                    _ => c.to_string(),
+                })
+                .collect();
+            url.push_str(&format!("?since={encoded}"));
+        }
         let resp = self.client.get(&url).send().await?;
 
         if !resp.status().is_success() {
@@ -119,17 +142,8 @@ impl ServerClient {
             return Err(SearchError::ServerError(format!("{status}: {body}")));
         }
 
-        let body: serde_json::Value = resp.json().await?;
-        let cids = body["entries"]
-            .as_array()
-            .map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|e| e["graph_cid"].as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(cids)
+        let sync_resp: CidsSyncResponse = resp.json().await?;
+        Ok(sync_resp)
     }
 
     /// Submit a graph to the server.

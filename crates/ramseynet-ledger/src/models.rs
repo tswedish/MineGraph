@@ -40,6 +40,15 @@ pub struct LeaderboardEntry {
     pub admitted_at: DateTime<Utc>,
 }
 
+/// A paginated slice of a leaderboard.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LeaderboardPage {
+    pub entries: Vec<LeaderboardEntry>,
+    pub total: u32,
+    pub offset: u32,
+    pub limit: u32,
+}
+
 /// Summary of a (k, ell, n) leaderboard.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeaderboardSummary {

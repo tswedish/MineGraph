@@ -12,6 +12,11 @@
 	let graphs = $state<RgxfJson[]>([]);
 	let now = $state(Date.now());
 
+	// Pagination state
+	const PAGE_SIZE = 50;
+	let currentPage = $state(1);
+	let totalPages = $derived(detail ? Math.max(1, Math.ceil(detail.total / PAGE_SIZE)) : 1);
+
 	// Tick every 5s for relative timestamps (uses $effect cleanup, not onDestroy)
 	$effect(() => {
 		const tick = setInterval(() => { now = Date.now(); }, 5_000);
@@ -34,7 +39,7 @@
 	/**
 	 * Distribution-based recency highlighting.
 	 * Computes percentile rank of each entry's age among all entries,
-	 * then maps top quantiles to green → yellow → transparent.
+	 * then maps top quantiles to green -> yellow -> transparent.
 	 * Intensity decays with absolute age of the newest entry (fades fully after 24h of inactivity).
 	 */
 	const recencyMap = $derived.by(() => {
@@ -53,7 +58,7 @@
 
 		// Absolute freshness decay: if even the newest entry is old, fade everything
 		const newestAge = sorted[0].age;
-		const freshness = Math.max(0, 1 - newestAge / (24 * 3_600_000)); // → 0 over 24h
+		const freshness = Math.max(0, 1 - newestAge / (24 * 3_600_000)); // -> 0 over 24h
 		if (freshness < 0.02) return map;
 
 		// Assign percentile rank: 0 = newest, 1 = oldest
@@ -66,11 +71,11 @@
 			const t = rankOf.get(cid)!; // 0 = newest, 1 = oldest
 
 			// Intensity: cubic dropoff emphasizing top quantiles
-			const raw = (1 - t) * (1 - t) * (1 - t); // 1.0 → 0.0
+			const raw = (1 - t) * (1 - t) * (1 - t); // 1.0 -> 0.0
 			const alpha = 0.35 * raw * freshness;
 			if (alpha < 0.008) continue;
 
-			// Hue: 140 (green) for top quantile → 55 (yellow) → 40 (warm) for bottom
+			// Hue: 140 (green) for top quantile -> 55 (yellow) -> 40 (warm) for bottom
 			const hue = 140 - t * 100;
 			map.set(cid, `background-color: hsla(${Math.round(hue)}, 75%, 50%, ${alpha.toFixed(3)})`);
 		}
@@ -78,10 +83,11 @@
 		return map;
 	});
 
-	function refresh(k: number, l: number, n: number) {
+	function refresh(k: number, l: number, n: number, pg: number = currentPage) {
+		const offset = (pg - 1) * PAGE_SIZE;
 		Promise.all([
-			getLeaderboard(k, l, n),
-			getLeaderboardGraphs(k, l, n)
+			getLeaderboard(k, l, n, offset, PAGE_SIZE),
+			getLeaderboardGraphs(k, l, n, PAGE_SIZE, offset)
 		])
 			.then(([data, graphData]) => {
 				// Detect new or rank-changed entries
@@ -109,11 +115,36 @@
 			});
 	}
 
+	/** Navigate to a specific page */
+	function goToPage(pg: number) {
+		if (pg < 1 || pg > totalPages || pg === currentPage) return;
+		currentPage = pg;
+		loading = true;
+		const k = Number(page.params.k);
+		const l = Number(page.params.l);
+		const n = Number(page.params.n);
+		refresh(k, l, n, pg);
+	}
+
+	/** Compute visible page numbers for pagination controls */
+	function visiblePages(current: number, total: number): number[] {
+		if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+		const pages: number[] = [1];
+		const start = Math.max(2, current - 1);
+		const end = Math.min(total - 1, current + 1);
+		if (start > 2) pages.push(-1); // ellipsis marker
+		for (let i = start; i <= end; i++) pages.push(i);
+		if (end < total - 1) pages.push(-1); // ellipsis marker
+		pages.push(total);
+		return pages;
+	}
+
 	/** Export leaderboard as CSV with full metadata + RGXF. */
 	async function exportCsv() {
 		if (!detail) return;
-		// Fetch all graphs (up to 100) to include RGXF in export
-		const allGraphs = await getLeaderboardGraphs(detail.k, detail.ell, detail.n, 100);
+		// Fetch current page graphs for CSV
+		const offset = (currentPage - 1) * PAGE_SIZE;
+		const allGraphs = await getLeaderboardGraphs(detail.k, detail.ell, detail.n, PAGE_SIZE, offset);
 
 		const header = 'rank,graph_cid,k,ell,n,c_max,c_min,aut_order,admitted_at,encoding,bits_b64';
 		const rows = detail.entries.map((e, i) => {
@@ -140,7 +171,7 @@
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
-		a.download = `ramseynet-R(${detail.k},${detail.ell})-n${detail.n}.csv`;
+		a.download = `ramseynet-R(${detail.k},${detail.ell})-n${detail.n}-page${currentPage}.csv`;
 		a.click();
 		URL.revokeObjectURL(url);
 	}
@@ -156,8 +187,9 @@
 		prevCids = new Set();
 		flashCids = new Set();
 		graphs = [];
+		currentPage = 1;
 
-		refresh(k, l, n);
+		refresh(k, l, n, 1);
 	});
 
 	// Smart polling: visibility-aware with error backoff
@@ -187,9 +219,10 @@
 			}
 			refreshing = true;
 			try {
+				const offset = (currentPage - 1) * PAGE_SIZE;
 				await Promise.all([
-					getLeaderboard(k, l, n),
-					getLeaderboardGraphs(k, l, n)
+					getLeaderboard(k, l, n, offset, PAGE_SIZE),
+					getLeaderboardGraphs(k, l, n, PAGE_SIZE, offset)
 				]).then(([data, graphData]) => {
 					const newFlash = new Set<string>();
 					for (const entry of data.entries) {
@@ -244,22 +277,37 @@
 </svelte:head>
 
 <div class="page">
-	{#if loading}
+	{#if loading && !detail}
 		<div class="loading">Loading leaderboard...</div>
-	{:else if error}
+	{:else if error && !detail}
 		<div class="error">{error}</div>
 	{:else if detail}
 		<a href="/leaderboards" class="back-link">Leaderboards</a>
 
 		<h1>R({detail.k},{detail.ell}) <span class="n-label">n={detail.n}</span></h1>
 		<div class="subtitle-row">
-			<p class="subtitle">{detail.entries.length} ranked {detail.entries.length === 1 ? 'entry' : 'entries'}</p>
+			{#if detail.total > 0}
+				{@const startRank = detail.offset + 1}
+				{@const endRank = detail.offset + detail.entries.length}
+				<p class="subtitle">
+					{#if detail.total <= PAGE_SIZE}
+						{detail.total} ranked {detail.total === 1 ? 'entry' : 'entries'}
+					{:else}
+						Showing {startRank}–{endRank} of {detail.total.toLocaleString()} entries
+					{/if}
+				</p>
+			{:else}
+				<p class="subtitle">No entries yet</p>
+			{/if}
 			{#if detail.entries.length > 0}
 				<button class="export-btn" onclick={exportCsv}>Export CSV</button>
 			{/if}
+			{#if loading}
+				<span class="poll-indicator" title="Refreshing..."></span>
+			{/if}
 		</div>
 
-		{#if detail.top_graph}
+		{#if detail.top_graph && currentPage === 1}
 			<section class="viz-section">
 				<h2>Top Graph</h2>
 				<div class="viz-row">
@@ -284,13 +332,13 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each detail.entries as entry (entry.graph_cid)}
+						{#each detail.entries as entry, i (entry.graph_cid)}
 							<tr class:rank1={entry.rank === 1} class:flash={flashCids.has(entry.graph_cid)} style={recencyMap.get(entry.graph_cid) ?? ''}>
 								<td class="rank">{entry.rank}</td>
 								<td class="thumb">
-									{#if graphs[entry.rank - 1]}
+									{#if graphs[i]}
 										<a href="/submissions/{entry.graph_cid}">
-											<GraphThumb rgxf={graphs[entry.rank - 1]} size={48} />
+											<GraphThumb rgxf={graphs[i]} size={48} />
 										</a>
 									{/if}
 								</td>
@@ -306,6 +354,48 @@
 					</tbody>
 				</table>
 			</section>
+
+			{#if totalPages > 1}
+				<nav class="pagination">
+					<button
+						class="page-btn"
+						disabled={currentPage === 1}
+						onclick={() => goToPage(1)}
+						title="First page"
+					>&laquo;</button>
+					<button
+						class="page-btn"
+						disabled={currentPage === 1}
+						onclick={() => goToPage(currentPage - 1)}
+						title="Previous page"
+					>&lsaquo;</button>
+
+					{#each visiblePages(currentPage, totalPages) as pg}
+						{#if pg === -1}
+							<span class="page-ellipsis">&hellip;</span>
+						{:else}
+							<button
+								class="page-btn"
+								class:active={pg === currentPage}
+								onclick={() => goToPage(pg)}
+							>{pg}</button>
+						{/if}
+					{/each}
+
+					<button
+						class="page-btn"
+						disabled={currentPage === totalPages}
+						onclick={() => goToPage(currentPage + 1)}
+						title="Next page"
+					>&rsaquo;</button>
+					<button
+						class="page-btn"
+						disabled={currentPage === totalPages}
+						onclick={() => goToPage(totalPages)}
+						title="Last page"
+					>&raquo;</button>
+				</nav>
+			{/if}
 		{:else}
 			<div class="empty">No entries yet. Submit a graph to be the first!</div>
 		{/if}
@@ -363,6 +453,21 @@
 	.subtitle {
 		color: var(--color-text-muted);
 		font-size: 0.875rem;
+	}
+
+	.poll-indicator {
+		display: inline-block;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--color-accent);
+		opacity: 0.6;
+		animation: pulse 1s ease-in-out infinite;
+	}
+
+	@keyframes pulse {
+		0%, 100% { opacity: 0.3; }
+		50% { opacity: 0.8; }
 	}
 
 	.export-btn {
@@ -496,5 +601,57 @@
 
 	tr.flash {
 		animation: flash-row 1.5s ease-out;
+	}
+
+	/* Pagination */
+	.pagination {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 0.25rem;
+		margin-top: 1.5rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--color-border);
+	}
+
+	.page-btn {
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		min-width: 2rem;
+		height: 2rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 0.375rem;
+		border: 1px solid var(--color-border);
+		border-radius: 0.375rem;
+		background: var(--color-surface);
+		color: var(--color-text-muted);
+		cursor: pointer;
+		transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+	}
+
+	.page-btn:hover:not(:disabled) {
+		color: var(--color-accent);
+		border-color: var(--color-accent);
+	}
+
+	.page-btn:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
+	}
+
+	.page-btn.active {
+		background: var(--color-accent);
+		border-color: var(--color-accent);
+		color: var(--color-bg);
+		font-weight: 700;
+	}
+
+	.page-ellipsis {
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		color: var(--color-text-muted);
+		padding: 0 0.25rem;
 	}
 </style>

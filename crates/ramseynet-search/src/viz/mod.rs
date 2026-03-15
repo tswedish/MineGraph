@@ -355,7 +355,7 @@ impl Default for DiscoveryCollector {
 
 impl DiscoveryCollector {
     pub fn new() -> Self {
-        Self::with_capacity(100)
+        Self::with_capacity(1000)
     }
 
     pub fn with_capacity(capacity: usize) -> Self {

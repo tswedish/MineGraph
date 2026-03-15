@@ -84,45 +84,65 @@ async fn list_n_for_pair(
     Ok(Json(json!({ "k": params.k, "ell": params.ell, "n_values": ns })))
 }
 
-/// GET /api/leaderboards/:k/:l/:n — full leaderboard for (k, ell, n).
+/// GET /api/leaderboards/:k/:l/:n — paginated leaderboard for (k, ell, n).
+/// Query params: ?offset=0&limit=50  (default limit=50, max 200)
 async fn get_leaderboard(
     State(state): State<Arc<AppState>>,
     Path((k, ell, n)): Path<(u32, u32, u32)>,
+    Query(q): Query<LeaderboardQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let params = RamseyParams::canonical(k, ell);
+    let offset = q.offset.unwrap_or(0);
+    let limit = q.limit.unwrap_or(50).min(200);
     let ledger = state.ledger.clone();
     let (pk, pl, pn) = (params.k, params.ell, n);
-    let entries = tokio::task::spawn_blocking(move || ledger.get_leaderboard(pk, pl, pn))
-        .await
-        .unwrap()
-        .map_err(map_ledger_error)?;
+    let page = tokio::task::spawn_blocking(move || {
+        ledger.get_leaderboard_page(pk, pl, pn, offset, limit)
+    })
+    .await
+    .unwrap()
+    .map_err(map_ledger_error)?;
 
-    // Fetch RGXF for the top entry if present
-    let top_graph: Option<Value> = if let Some(top) = entries.first() {
-        let ledger2 = state.ledger.clone();
-        let cid = top.graph_cid.clone();
-        let rgxf_str = tokio::task::spawn_blocking(move || ledger2.get_submission_rgxf(&cid))
-            .await
-            .unwrap()
-            .map_err(map_ledger_error)?;
-        rgxf_str.and_then(|s| serde_json::from_str(&s).ok())
+    // Fetch RGXF for the top entry only on the first page
+    let top_graph: Option<Value> = if offset == 0 {
+        if let Some(top) = page.entries.first() {
+            let ledger2 = state.ledger.clone();
+            let cid = top.graph_cid.clone();
+            let rgxf_str = tokio::task::spawn_blocking(move || ledger2.get_submission_rgxf(&cid))
+                .await
+                .unwrap()
+                .map_err(map_ledger_error)?;
+            rgxf_str.and_then(|s| serde_json::from_str(&s).ok())
+        } else {
+            None
+        }
     } else {
         None
     };
 
     debug!(
         k = params.k, ell = params.ell, n,
-        entries = entries.len(),
-        "serving leaderboard detail"
+        total = page.total, offset, limit,
+        entries = page.entries.len(),
+        "serving leaderboard page"
     );
 
     Ok(Json(json!({
         "k": params.k,
         "ell": params.ell,
         "n": n,
-        "entries": entries,
+        "total": page.total,
+        "offset": page.offset,
+        "limit": page.limit,
+        "entries": page.entries,
         "top_graph": top_graph,
     })))
+}
+
+#[derive(Deserialize)]
+struct LeaderboardQuery {
+    offset: Option<u32>,
+    limit: Option<u32>,
 }
 
 /// GET /api/leaderboards/:k/:l/:n/threshold — admission threshold.
@@ -141,18 +161,20 @@ async fn get_threshold(
     Ok(Json(json!(info)))
 }
 
-/// GET /api/leaderboards/:k/:l/:n/graphs — RGXF for top leaderboard entries.
+/// GET /api/leaderboards/:k/:l/:n/graphs — RGXF for leaderboard entries.
+/// Query params: ?limit=10&offset=0  (default limit=10, max 200)
 async fn get_leaderboard_graphs(
     State(state): State<Arc<AppState>>,
     Path((k, ell, n)): Path<(u32, u32, u32)>,
     Query(params): Query<GraphsQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let rp = RamseyParams::canonical(k, ell);
-    let limit = params.limit.unwrap_or(10).min(100);
+    let limit = params.limit.unwrap_or(10).min(200);
+    let offset = params.offset.unwrap_or(0);
     let ledger = state.ledger.clone();
     let (pk, pl) = (rp.k, rp.ell);
     let rgxfs = tokio::task::spawn_blocking(move || {
-        ledger.get_leaderboard_graphs(pk, pl, n, limit)
+        ledger.get_leaderboard_graphs(pk, pl, n, limit, offset)
     })
     .await
     .unwrap()
@@ -163,7 +185,7 @@ async fn get_leaderboard_graphs(
         .filter_map(|s| serde_json::from_str(&s).ok())
         .collect();
 
-    debug!(k = rp.k, ell = rp.ell, n, count = graphs.len(), "serving leaderboard graphs");
+    debug!(k = rp.k, ell = rp.ell, n, count = graphs.len(), offset, "serving leaderboard graphs");
 
     Ok(Json(json!({
         "k": rp.k,
@@ -176,6 +198,47 @@ async fn get_leaderboard_graphs(
 #[derive(Deserialize)]
 struct GraphsQuery {
     limit: Option<u32>,
+    offset: Option<u32>,
+}
+
+/// GET /api/leaderboards/:k/:l/:n/cids — incremental CID sync for workers.
+/// Query params: ?since=<ISO8601>  (omit for full sync)
+async fn get_leaderboard_cids(
+    State(state): State<Arc<AppState>>,
+    Path((k, ell, n)): Path<(u32, u32, u32)>,
+    Query(params): Query<CidsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let rp = RamseyParams::canonical(k, ell);
+    let since = params.since.clone();
+    let ledger = state.ledger.clone();
+    let (pk, pl) = (rp.k, rp.ell);
+    let (cids, total, last_updated) = tokio::task::spawn_blocking(move || {
+        ledger.get_cids_since(pk, pl, n, since.as_deref())
+    })
+    .await
+    .unwrap()
+    .map_err(map_ledger_error)?;
+
+    debug!(
+        k = rp.k, ell = rp.ell, n,
+        since = ?params.since,
+        cids = cids.len(), total,
+        "serving leaderboard CIDs"
+    );
+
+    Ok(Json(json!({
+        "k": rp.k,
+        "ell": rp.ell,
+        "n": n,
+        "total": total,
+        "cids": cids,
+        "last_updated": last_updated,
+    })))
+}
+
+#[derive(Deserialize)]
+struct CidsQuery {
+    since: Option<String>,
 }
 
 // ── Verify ──────────────────────────────────────────────────────────
@@ -447,6 +510,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/leaderboards/{k}/{l}/{n}/graphs",
             get(get_leaderboard_graphs),
+        )
+        .route(
+            "/api/leaderboards/{k}/{l}/{n}/cids",
+            get(get_leaderboard_cids),
         )
         .route("/api/submissions/{cid}", get(get_submission))
         .route("/api/verify", post(verify))

@@ -74,6 +74,18 @@ struct Cli {
     #[arg(long)]
     noise_flips: Option<u32>,
 
+    /// Sampling bias for leaderboard init: 0.0 = uniform, 1.0 = top-heavy
+    #[arg(long, default_value = "0.5")]
+    sample_bias: f64,
+
+    /// How many graphs to fetch from the server for leaderboard seeding
+    #[arg(long, default_value = "100")]
+    leaderboard_sample_size: u32,
+
+    /// Per-strategy discovery buffer capacity (number of unique graphs buffered between submissions)
+    #[arg(long, default_value = "1000")]
+    collector_capacity: usize,
+
     /// Beam width for tree search
     #[arg(long, default_value = "100")]
     beam_width: usize,
@@ -119,10 +131,11 @@ async fn main() -> Result<()> {
             let num_edges = n * (n - 1) / 2;
             let auto_noise = ((num_edges as f64).sqrt() / 2.0).ceil() as u32;
             let noise = cli.noise_flips.unwrap_or(auto_noise);
-            info!(noise_flips = noise, "using leaderboard init strategy");
+            info!(noise_flips = noise, sample_bias = cli.sample_bias, "using leaderboard init strategy");
             InitStrategy::Leaderboard {
                 pool: Arc::clone(&leaderboard_pool),
                 noise_flips: noise,
+                sample_bias: cli.sample_bias,
             }
         }
         other => anyhow::bail!("unknown init strategy: {other} (use paley, perturbed-paley, random, balanced, leaderboard)"),
@@ -178,6 +191,8 @@ async fn main() -> Result<()> {
         } else {
             None
         },
+        leaderboard_sample_size: cli.leaderboard_sample_size,
+        collector_capacity: cli.collector_capacity,
     };
 
     // Graceful shutdown on Ctrl+C

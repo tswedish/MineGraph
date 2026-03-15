@@ -5,9 +5,6 @@ use crate::error::LedgerError;
 use crate::models::*;
 use crate::Ledger;
 
-/// Maximum entries per (k, ell, n) leaderboard.
-const LEADERBOARD_CAPACITY: u32 = 100;
-
 // ── Submission + Receipt operations ──────────────────────────────────
 
 impl Ledger {
@@ -156,7 +153,7 @@ impl Ledger {
         )?;
 
         // If full, check against worst entry
-        if count >= LEADERBOARD_CAPACITY {
+        if count >= self.capacity {
             // Get the worst entry (highest rank number)
             let worst = conn.query_row(
                 "SELECT tier1_max, tier1_min, tier2_aut, tier3_cid, graph_cid FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank DESC LIMIT 1",
@@ -195,12 +192,13 @@ impl Ledger {
             )?;
         }
 
-        // Insert the new entry (with temporary rank=100, will be recomputed)
+        // Insert the new entry (with temporary rank=capacity, will be recomputed)
         let now = Utc::now();
         conn.execute(
-            "INSERT INTO leaderboard (k, ell, n, graph_cid, rank, tier1_max, tier1_min, tier2_aut, tier3_cid, score_json, admitted_at) VALUES (?1, ?2, ?3, ?4, 100, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO leaderboard (k, ell, n, graph_cid, rank, tier1_max, tier1_min, tier2_aut, tier3_cid, score_json, admitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 k, ell, n, graph_cid,
+                self.capacity,
                 score.tier1_max as i64,
                 score.tier1_min as i64,
                 score.tier2_aut,
@@ -247,10 +245,10 @@ impl Ledger {
             |row| row.get(0),
         )?;
 
-        if count < LEADERBOARD_CAPACITY {
+        if count < self.capacity {
             return Ok(ThresholdInfo {
                 entry_count: count,
-                capacity: LEADERBOARD_CAPACITY,
+                capacity: self.capacity,
                 worst_tier1_max: None,
                 worst_tier1_min: None,
                 worst_tier2_aut: None,
@@ -274,7 +272,7 @@ impl Ledger {
 
         Ok(ThresholdInfo {
             entry_count: count,
-            capacity: LEADERBOARD_CAPACITY,
+            capacity: self.capacity,
             worst_tier1_max: Some(worst.0),
             worst_tier1_min: Some(worst.1),
             worst_tier2_aut: Some(worst.2),
@@ -315,6 +313,98 @@ impl Ledger {
         Ok(entries)
     }
 
+    /// Get a paginated slice of the leaderboard for a (k, ell, n) triple.
+    pub fn get_leaderboard_page(
+        &self,
+        k: u32,
+        ell: u32,
+        n: u32,
+        offset: u32,
+        limit: u32,
+    ) -> Result<LeaderboardPage, LedgerError> {
+        let (k, ell) = canonical(k, ell);
+        let conn = self.conn.lock().unwrap();
+
+        let total: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3",
+            params![k, ell, n],
+            |row| row.get(0),
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, tier2_aut, score_json, admitted_at \
+             FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank LIMIT ?4 OFFSET ?5",
+        )?;
+        let rows = stmt.query_map(params![k, ell, n, limit, offset], |row| {
+            Ok(LeaderboardEntry {
+                k: row.get(0)?,
+                ell: row.get(1)?,
+                n: row.get(2)?,
+                graph_cid: row.get(3)?,
+                rank: row.get(4)?,
+                tier1_max: row.get::<_, i64>(5)? as u64,
+                tier1_min: row.get::<_, i64>(6)? as u64,
+                tier2_aut: row.get(7)?,
+                score_json: row.get(8)?,
+                admitted_at: parse_datetime(row.get::<_, String>(9)?),
+            })
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+
+        Ok(LeaderboardPage {
+            entries,
+            total,
+            offset,
+            limit,
+        })
+    }
+
+    /// Get CIDs of leaderboard entries admitted after the given ISO 8601 timestamp.
+    /// If `since` is None, returns all CIDs on the leaderboard.
+    pub fn get_cids_since(
+        &self,
+        k: u32,
+        ell: u32,
+        n: u32,
+        since: Option<&str>,
+    ) -> Result<(Vec<String>, u32, Option<String>), LedgerError> {
+        let (k, ell) = canonical(k, ell);
+        let conn = self.conn.lock().unwrap();
+
+        let total: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3",
+            params![k, ell, n],
+            |row| row.get(0),
+        )?;
+
+        let last_updated: Option<String> = conn
+            .query_row(
+                "SELECT MAX(admitted_at) FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3",
+                params![k, ell, n],
+                |row| row.get(0),
+            )
+            .unwrap_or(None);
+
+        let cids = if let Some(since) = since {
+            let mut stmt = conn.prepare(
+                "SELECT graph_cid FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND admitted_at > ?4 ORDER BY admitted_at",
+            )?;
+            let rows = stmt.query_map(params![k, ell, n, since], |row| row.get(0))?;
+            rows.collect::<Result<Vec<String>, _>>()?
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT graph_cid FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank",
+            )?;
+            let rows = stmt.query_map(params![k, ell, n], |row| row.get(0))?;
+            rows.collect::<Result<Vec<String>, _>>()?
+        };
+
+        Ok((cids, total, last_updated))
+    }
+
     /// List all distinct (k, ell, n) leaderboards with summary info.
     pub fn list_leaderboards(&self) -> Result<Vec<LeaderboardSummary>, LedgerError> {
         let conn = self.conn.lock().unwrap();
@@ -348,9 +438,8 @@ impl Ledger {
     pub fn list_n_for_pair(&self, k: u32, ell: u32) -> Result<Vec<u32>, LedgerError> {
         let (k, ell) = canonical(k, ell);
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT n FROM leaderboard WHERE k=?1 AND ell=?2 ORDER BY n",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT DISTINCT n FROM leaderboard WHERE k=?1 AND ell=?2 ORDER BY n")?;
         let rows = stmt.query_map(params![k, ell], |row| row.get(0))?;
         let mut ns = Vec::new();
         for row in rows {
@@ -359,13 +448,14 @@ impl Ledger {
         Ok(ns)
     }
 
-    /// Get RGXF JSON for the top `limit` leaderboard entries for a (k, ell, n) triple.
+    /// Get RGXF JSON for leaderboard entries for a (k, ell, n) triple with pagination.
     pub fn get_leaderboard_graphs(
         &self,
         k: u32,
         ell: u32,
         n: u32,
         limit: u32,
+        offset: u32,
     ) -> Result<Vec<String>, LedgerError> {
         let (k, ell) = canonical(k, ell);
         let conn = self.conn.lock().unwrap();
@@ -373,9 +463,9 @@ impl Ledger {
             "SELECT gs.rgxf_json FROM leaderboard lb \
              JOIN graph_submissions gs ON gs.graph_cid = lb.graph_cid \
              WHERE lb.k=?1 AND lb.ell=?2 AND lb.n=?3 \
-             ORDER BY lb.rank LIMIT ?4",
+             ORDER BY lb.rank LIMIT ?4 OFFSET ?5",
         )?;
-        let rows = stmt.query_map(params![k, ell, n, limit], |row| row.get(0))?;
+        let rows = stmt.query_map(params![k, ell, n, limit, offset], |row| row.get(0))?;
         let mut rgxfs = Vec::new();
         for row in rows {
             rgxfs.push(row?);
@@ -489,8 +579,9 @@ fn canonical(k: u32, ell: u32) -> (u32, u32) {
 }
 
 /// Recompute ranks for a (k, ell, n) leaderboard by fetching all entries,
-/// sorting in Rust, and writing ranks back. Max 100 rows — trivially fast.
-fn recompute_ranks(
+/// sorting in Rust, and writing ranks back. At 10k entries this is still
+/// fast (~ms) since it's a single scan + in-memory sort + batch update.
+pub(crate) fn recompute_ranks(
     conn: &rusqlite::Connection,
     k: u32,
     ell: u32,

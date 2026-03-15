@@ -15,6 +15,11 @@ struct Config {
     #[arg(long, default_value = "ramseynet.db")]
     db_path: String,
 
+    /// Maximum entries per (k, ell, n) leaderboard. On startup, any
+    /// leaderboard exceeding this capacity is trimmed to fit.
+    #[arg(long, default_value = "10000")]
+    leaderboard_capacity: u32,
+
     /// Increase log verbosity (-v info, -vv debug, -vvv trace)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
@@ -39,7 +44,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let ledger = Arc::new(Ledger::open(&config.db_path)?);
+    let ledger = Arc::new(Ledger::open_with_capacity(
+        &config.db_path,
+        config.leaderboard_capacity,
+    )?);
 
     let state = Arc::new(AppState { ledger });
     let app = ramseynet_server::create_router(state);
@@ -48,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         port = config.port,
         db = %config.db_path,
+        leaderboard_capacity = config.leaderboard_capacity,
         verbosity = config.verbose,
         "RamseyNet server listening on {addr}"
     );

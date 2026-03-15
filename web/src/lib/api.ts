@@ -55,6 +55,9 @@ export interface LeaderboardDetail {
 	k: number;
 	ell: number;
 	n: number;
+	total: number;
+	offset: number;
+	limit: number;
 	entries: LeaderboardEntry[];
 	top_graph: RgxfJson | null;
 }
@@ -128,9 +131,13 @@ export async function getNValuesForPair(
 export async function getLeaderboard(
 	k: number,
 	ell: number,
-	n: number
+	n: number,
+	offset: number = 0,
+	limit: number = 50
 ): Promise<LeaderboardDetail> {
-	const res = await fetch(`${BASE}/leaderboards/${k}/${ell}/${n}`);
+	const res = await fetch(
+		`${BASE}/leaderboards/${k}/${ell}/${n}?offset=${offset}&limit=${limit}`
+	);
 	if (!res.ok) {
 		const err = await res.json();
 		throw new Error(err.error || `HTTP ${res.status}`);
@@ -142,9 +149,12 @@ export async function getLeaderboardGraphs(
 	k: number,
 	ell: number,
 	n: number,
-	limit: number = 100
+	limit: number = 50,
+	offset: number = 0
 ): Promise<RgxfJson[]> {
-	const res = await fetch(`${BASE}/leaderboards/${k}/${ell}/${n}/graphs?limit=${limit}`);
+	const res = await fetch(
+		`${BASE}/leaderboards/${k}/${ell}/${n}/graphs?limit=${limit}&offset=${offset}`
+	);
 	if (!res.ok) {
 		return []; // graceful fallback — thumbnails just won't render
 	}

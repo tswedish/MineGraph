@@ -82,6 +82,10 @@ pub struct WorkerConfig {
     /// Shared pool for leaderboard-seeded init strategy. When `Some`, the
     /// worker refreshes this pool from the server each round.
     pub leaderboard_pool: Option<Arc<Mutex<Vec<AdjacencyMatrix>>>>,
+    /// How many graphs to fetch from the server for leaderboard seed pool.
+    pub leaderboard_sample_size: u32,
+    /// Per-strategy discovery buffer capacity.
+    pub collector_capacity: usize,
 }
 
 // ── Periodic submission ─────────────────────────────────────────────
@@ -189,6 +193,11 @@ pub async fn run_worker(
     // beat the leaderboard.
     let mut threshold = AdmissionThreshold::open();
 
+    // Tracks the last_updated timestamp for incremental CID sync.
+    // None on first round → full sync. Subsequent rounds use the
+    // timestamp to fetch only newly admitted CIDs.
+    let mut cid_sync_cursor: Option<String> = None;
+
     loop {
         // Check shutdown
         if *shutdown.borrow() {
@@ -213,20 +222,36 @@ pub async fn run_worker(
             }
         }
 
-        // Refresh known CIDs from server leaderboard
-        match client.get_leaderboard_cids(k, ell, target_n).await {
-            Ok(cids) => {
-                known.add_from_hex(&cids);
-                info!(known = known.len(), "refreshed known CIDs from server");
+        // Incremental CID sync from server leaderboard
+        match client
+            .get_leaderboard_cids_since(k, ell, target_n, cid_sync_cursor.as_deref())
+            .await
+        {
+            Ok(resp) => {
+                if !resp.cids.is_empty() {
+                    known.add_from_hex(&resp.cids);
+                }
+                if let Some(ref ts) = resp.last_updated {
+                    cid_sync_cursor = Some(ts.clone());
+                }
+                info!(
+                    known = known.len(),
+                    new_cids = resp.cids.len(),
+                    total = resp.total,
+                    "synced leaderboard CIDs"
+                );
             }
             Err(e) => {
-                warn!("failed to fetch leaderboard CIDs: {e}");
+                warn!("failed to sync leaderboard CIDs: {e}");
             }
         }
 
         // Refresh leaderboard pool if using leaderboard init
         if let Some(ref pool) = config.leaderboard_pool {
-            match client.get_leaderboard_graphs(k, ell, target_n, 20).await {
+            match client
+                .get_leaderboard_graphs(k, ell, target_n, config.leaderboard_sample_size)
+                .await
+            {
                 Ok(rgxfs) => {
                     let graphs: Vec<AdjacencyMatrix> = rgxfs
                         .iter()
@@ -259,7 +284,7 @@ pub async fn run_worker(
             info!(strategy, target_n, max_iters, "running search");
 
             // Collector with cross-round dedup via known CIDs
-            let collector = DiscoveryCollector::with_known(100, known.clone());
+            let collector = DiscoveryCollector::with_known(config.collector_capacity, known.clone());
             let collector_for_search = collector.clone();
             let collector_for_submit = collector.clone();
             let n = target_n;
@@ -477,7 +502,7 @@ async fn run_worker_offline(
             let searcher = Arc::clone(searcher);
             let mut search_rng = SmallRng::from_rng(&mut rng).unwrap();
             let viz = viz_handle.clone();
-            let collector = DiscoveryCollector::with_known(100, known.clone());
+            let collector = DiscoveryCollector::with_known(config.collector_capacity, known.clone());
             let collector_for_search = collector.clone();
             let (result, score) = tokio::task::spawn_blocking(move || {
                 let viz_obs = viz.map(VizObserver::new);

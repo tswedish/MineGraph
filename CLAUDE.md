@@ -25,9 +25,13 @@ Other commands: `clippy`, `build`, `web` (production build).
 ./run search --k 4 --ell 4 --n 17 --offline --viz-port 8080  # no server needed
 ```
 
-Options: `--strategy {greedy|local|annealing|tree|all}`, `--init {perturbed-paley|paley|random|balanced|leaderboard}`, `--noise-flips N`, `--max-iters N`, `--tabu-tenure N`, `--initial-temp F`, `--cooling-rate F`, `--beam-width N`, `--max-depth N`, `--viz-port PORT`, `--offline`, `--no-backoff`.
+Options: `--strategy {greedy|local|annealing|tree|all}`, `--init {perturbed-paley|paley|random|balanced|leaderboard}`, `--noise-flips N`, `--max-iters N`, `--tabu-tenure N`, `--initial-temp F`, `--cooling-rate F`, `--beam-width N`, `--max-depth N`, `--viz-port PORT`, `--offline`, `--no-backoff`, `--sample-bias F`, `--leaderboard-sample-size N`, `--collector-capacity N`.
 
-**Discovery submission:** All valid graphs found during search (not just the final result) are collected in a bounded, score-sorted buffer (top 100) and submitted to the server. This is especially useful for tree/beam search which discovers many valid graphs per run.
+**Discovery submission:** All valid graphs found during search (not just the final result) are collected in a bounded, score-sorted buffer (default 1,000, configurable via `--collector-capacity`) and submitted to the server. This is especially useful for tree/beam search which discovers many valid graphs per run.
+
+**Leaderboard sampling:** When using `--init leaderboard`, the `--sample-bias` parameter (0.0–1.0, default 0.5) controls how graphs are sampled from the server pool. 0.0 = uniform, 1.0 = strongly prefer top-ranked. `--leaderboard-sample-size` (default 100) controls how many graphs are fetched for the seed pool.
+
+**Incremental CID sync:** The worker uses the `/api/leaderboards/{k}/{l}/{n}/cids?since=<timestamp>` endpoint to incrementally sync known CIDs from the server, fetching only newly admitted entries after the first full sync. This avoids downloading the full leaderboard each round.
 
 ## Architecture
 
@@ -46,7 +50,7 @@ Rust workspace (`crates/`) + SvelteKit 2 (`web/`).
 
 ## Leaderboard System
 
-Every valid (K,L,n) triple implicitly defines a leaderboard of capacity 100. No explicit "challenges" — submit directly with `{k, ell, n, graph}`.
+Every valid (K,L,n) triple implicitly defines a leaderboard of capacity 10,000 (configurable via `--leaderboard-capacity` on the server). No explicit "challenges" — submit directly with `{k, ell, n, graph}`. Capacity can be changed at server restart — shrinking trims the lowest-ranked entries automatically.
 
 **Scoring** (3-tier lexicographic, lower is better):
 - **T1**: `(max(C_omega, C_alpha), min(C_omega, C_alpha))` — clique counts, lowest wins
@@ -73,7 +77,7 @@ K ≤ L canonical form enforced everywhere (R(K,L) = R(L,K)).
 |-------|---------|
 | `/` | Homepage with health badge, nav cards, live event feed |
 | `/leaderboards` | Browse by (K,L) pairs, drill into n values |
-| `/leaderboards/[k]/[l]/[n]` | Ranked table with score columns, top graph viz, auto-refresh via polling |
+| `/leaderboards/[k]/[l]/[n]` | Paginated ranked table with score columns, top graph viz, auto-refresh via polling |
 | `/submissions/[cid]` | Submission detail: verdict, witness, graph viz, rank |
 | `/submit` | Standalone graph submission form |
 
@@ -86,9 +90,10 @@ Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
 | `/api/health` | GET | Health check |
 | `/api/leaderboards` | GET | List all (K,L,n) leaderboards with summary |
 | `/api/leaderboards/{k}/{l}` | GET | List n values for a (K,L) pair |
-| `/api/leaderboards/{k}/{l}/{n}` | GET | Full leaderboard with entries + top graph |
+| `/api/leaderboards/{k}/{l}/{n}` | GET | Paginated leaderboard (`?offset=0&limit=50`) + top graph |
 | `/api/leaderboards/{k}/{l}/{n}/threshold` | GET | Admission threshold (score-to-beat) |
-| `/api/leaderboards/{k}/{l}/{n}/graphs` | GET | RGXF for top leaderboard entries (`?limit=N`) |
+| `/api/leaderboards/{k}/{l}/{n}/graphs` | GET | RGXF for leaderboard entries (`?limit=N&offset=N`) |
+| `/api/leaderboards/{k}/{l}/{n}/cids` | GET | Incremental CID sync (`?since=<ISO8601>`) |
 | `/api/submissions/{cid}` | GET | Submission detail: graph, receipt, rank |
 | `/api/verify` | POST | Stateless graph verification |
 | `/api/submit` | POST | Full lifecycle: verify + store + leaderboard admit |

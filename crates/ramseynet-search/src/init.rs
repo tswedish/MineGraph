@@ -8,9 +8,9 @@
 
 use std::sync::{Arc, Mutex};
 
+use ramseynet_graph::AdjacencyMatrix;
 use rand::rngs::SmallRng;
 use rand::Rng;
-use ramseynet_graph::AdjacencyMatrix;
 
 /// Available graph initialization strategies.
 #[derive(Clone, Debug)]
@@ -40,17 +40,24 @@ pub enum InitStrategy {
         density: f64,
     },
 
-    /// Seed from server leaderboard entries. Picks a random graph from the
-    /// shared pool each invocation, optionally applying random edge flips as
-    /// noise. Falls back to PerturbedPaley if the pool is empty.
+    /// Seed from server leaderboard entries. Picks a graph from the shared
+    /// pool each invocation using weighted sampling, optionally applying
+    /// random edge flips as noise. Falls back to PerturbedPaley if the pool
+    /// is empty.
     ///
     /// The pool is behind `Arc<Mutex<>>` so the worker can refresh it each
     /// round while searchers read from it concurrently.
     Leaderboard {
-        /// Shared pool of graphs, updated by the worker loop.
+        /// Shared pool of graphs, updated by the worker loop. Ordered by
+        /// rank (best first).
         pool: Arc<Mutex<Vec<AdjacencyMatrix>>>,
         /// Number of random edge flips to apply as noise (0 = use as-is).
         noise_flips: u32,
+        /// Sampling bias: 0.0 = uniform across pool, 1.0 = strongly
+        /// prefer top-ranked graphs. Uses exponential weighting:
+        /// weight(i) = exp(-bias * 5.0 * i / n). At bias=0 all weights
+        /// are 1.0. At bias=1.0 the worst graph gets weight ~0.007.
+        sample_bias: f64,
     },
 }
 
@@ -83,7 +90,11 @@ pub fn init_graph(n: u32, strategy: &InitStrategy, rng: &mut SmallRng) -> Adjace
             }
             g
         }
-        InitStrategy::Leaderboard { pool, noise_flips } => {
+        InitStrategy::Leaderboard {
+            pool,
+            noise_flips,
+            sample_bias,
+        } => {
             let graphs = pool.lock().unwrap();
             if graphs.is_empty() {
                 drop(graphs);
@@ -92,7 +103,8 @@ pub fn init_graph(n: u32, strategy: &InitStrategy, rng: &mut SmallRng) -> Adjace
                 perturb(&mut g, 0.05, rng);
                 g
             } else {
-                let mut g = graphs[rng.gen_range(0..graphs.len())].clone();
+                let idx = weighted_sample(graphs.len(), *sample_bias, rng);
+                let mut g = graphs[idx].clone();
                 drop(graphs);
                 // Apply noise flips
                 if *noise_flips > 0 {
@@ -102,6 +114,27 @@ pub fn init_graph(n: u32, strategy: &InitStrategy, rng: &mut SmallRng) -> Adjace
             }
         }
     }
+}
+
+/// Select an index from 0..len using exponential weighting.
+/// `bias` in [0.0, 1.0]: 0.0 = uniform, 1.0 = strongly prefer index 0.
+/// weight(i) = exp(-bias * 5.0 * i / (len - 1))
+fn weighted_sample(len: usize, bias: f64, rng: &mut SmallRng) -> usize {
+    if len <= 1 || bias <= 0.0 {
+        return rng.gen_range(0..len);
+    }
+    let n = len as f64;
+    // Build CDF from exponential weights
+    let mut cumulative = Vec::with_capacity(len);
+    let mut total = 0.0_f64;
+    for i in 0..len {
+        let w = (-bias * 5.0 * i as f64 / (n - 1.0)).exp();
+        total += w;
+        cumulative.push(total);
+    }
+    // Sample from CDF
+    let r = rng.gen::<f64>() * total;
+    cumulative.iter().position(|&c| c > r).unwrap_or(len - 1)
 }
 
 /// Flip exactly `count` randomly chosen edges.
@@ -231,9 +264,9 @@ fn quadratic_residues(p: u32) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use ramseynet_graph::compute_cid;
     use ramseynet_verifier::verify_ramsey;
+    use rand::SeedableRng;
 
     #[test]
     fn paley_17_is_valid_r44() {
@@ -241,8 +274,11 @@ mod tests {
         assert_eq!(g.n(), 17);
         let cid = compute_cid(&g);
         let result = verify_ramsey(&g, 4, 4, &cid);
-        assert_eq!(result.verdict, ramseynet_types::Verdict::Accepted,
-            "Paley(17) should be valid for R(4,4)");
+        assert_eq!(
+            result.verdict,
+            ramseynet_types::Verdict::Accepted,
+            "Paley(17) should be valid for R(4,4)"
+        );
     }
 
     #[test]
@@ -251,8 +287,11 @@ mod tests {
         assert_eq!(g.n(), 13);
         let cid = compute_cid(&g);
         let result = verify_ramsey(&g, 4, 4, &cid);
-        assert_eq!(result.verdict, ramseynet_types::Verdict::Accepted,
-            "Paley(13) should be valid for R(4,4)");
+        assert_eq!(
+            result.verdict,
+            ramseynet_types::Verdict::Accepted,
+            "Paley(13) should be valid for R(4,4)"
+        );
     }
 
     #[test]
@@ -262,8 +301,11 @@ mod tests {
         // Paley(5) is C5
         let cid = compute_cid(&g);
         let result = verify_ramsey(&g, 3, 3, &cid);
-        assert_eq!(result.verdict, ramseynet_types::Verdict::Accepted,
-            "Paley(5) should be valid for R(3,3)");
+        assert_eq!(
+            result.verdict,
+            ramseynet_types::Verdict::Accepted,
+            "Paley(5) should be valid for R(3,3)"
+        );
     }
 
     #[test]
@@ -279,8 +321,16 @@ mod tests {
     fn perturbed_paley_varies() {
         let mut rng1 = SmallRng::seed_from_u64(1);
         let mut rng2 = SmallRng::seed_from_u64(2);
-        let g1 = init_graph(15, &InitStrategy::PerturbedPaley { flip_fraction: 0.1 }, &mut rng1);
-        let g2 = init_graph(15, &InitStrategy::PerturbedPaley { flip_fraction: 0.1 }, &mut rng2);
+        let g1 = init_graph(
+            15,
+            &InitStrategy::PerturbedPaley { flip_fraction: 0.1 },
+            &mut rng1,
+        );
+        let g2 = init_graph(
+            15,
+            &InitStrategy::PerturbedPaley { flip_fraction: 0.1 },
+            &mut rng2,
+        );
         // Different seeds should produce different graphs
         let mut same = true;
         for i in 0..15 {
@@ -290,14 +340,17 @@ mod tests {
                 }
             }
         }
-        assert!(!same, "different seeds should produce different perturbed graphs");
+        assert!(
+            !same,
+            "different seeds should produce different perturbed graphs"
+        );
     }
 
     #[test]
     fn smallest_paley_prime_values() {
-        assert_eq!(smallest_paley_prime(5), 5);   // 5 ≡ 1 (mod 4), prime
-        assert_eq!(smallest_paley_prime(6), 13);   // next: 13
-        assert_eq!(smallest_paley_prime(14), 17);  // next: 17
+        assert_eq!(smallest_paley_prime(5), 5); // 5 ≡ 1 (mod 4), prime
+        assert_eq!(smallest_paley_prime(6), 13); // next: 13
+        assert_eq!(smallest_paley_prime(14), 17); // next: 17
         assert_eq!(smallest_paley_prime(17), 17);
         assert_eq!(smallest_paley_prime(18), 29);
     }
@@ -325,7 +378,11 @@ mod tests {
         // Create a pool with a known graph (C5)
         let c5 = paley_graph(5);
         let pool = Arc::new(Mutex::new(vec![c5.clone()]));
-        let strategy = InitStrategy::Leaderboard { pool, noise_flips: 0 };
+        let strategy = InitStrategy::Leaderboard {
+            pool,
+            noise_flips: 0,
+            sample_bias: 0.0,
+        };
         let g = init_graph(5, &strategy, &mut rng);
         // With no noise and only one graph in pool, output should match
         assert_eq!(g.num_edges(), c5.num_edges());
@@ -341,7 +398,11 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
         let c5 = paley_graph(5);
         let pool = Arc::new(Mutex::new(vec![c5.clone()]));
-        let strategy = InitStrategy::Leaderboard { pool, noise_flips: 3 };
+        let strategy = InitStrategy::Leaderboard {
+            pool,
+            noise_flips: 3,
+            sample_bias: 0.0,
+        };
         let g = init_graph(5, &strategy, &mut rng);
         // With 3 noise flips, graph should differ from C5
         let mut diffs = 0;
@@ -359,7 +420,11 @@ mod tests {
     fn leaderboard_init_falls_back_when_empty() {
         let mut rng = SmallRng::seed_from_u64(42);
         let pool = Arc::new(Mutex::new(Vec::new()));
-        let strategy = InitStrategy::Leaderboard { pool, noise_flips: 0 };
+        let strategy = InitStrategy::Leaderboard {
+            pool,
+            noise_flips: 0,
+            sample_bias: 0.5,
+        };
         let g = init_graph(5, &strategy, &mut rng);
         // Should fall back to perturbed Paley — just check it produces a valid graph
         assert_eq!(g.n(), 5);
