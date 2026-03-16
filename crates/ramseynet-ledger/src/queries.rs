@@ -79,6 +79,14 @@ impl Ledger {
     /// reduces the number of spawn_blocking calls needed in the server.
     ///
     /// Returns `(is_duplicate, Option<LeaderboardEntry>)`.
+    /// Submission identity info passed from the server.
+    pub struct SubmitIdentity<'a> {
+        pub key_id: Option<&'a str>,
+        pub signature: Option<&'a str>,
+        pub sig_status: &'a str, // "anonymous", "verified", "invalid", "unregistered"
+        pub commit_hash: Option<&'a str>,
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn submit_and_admit(
         &self,
@@ -91,7 +99,7 @@ impl Ledger {
         reason: Option<&str>,
         witness: Option<&[u32]>,
         score: Option<&AdmitScore>,
-        key_id: Option<&str>,
+        identity: &SubmitIdentity<'_>,
     ) -> Result<(bool, Option<LeaderboardEntry>), LedgerError> {
         let (k, ell) = canonical(k, ell);
         let mut conn = self.conn.lock().unwrap();
@@ -101,8 +109,8 @@ impl Ledger {
 
         // 1. Store submission (detect duplicate)
         let is_duplicate = match tx.execute(
-            "INSERT INTO graph_submissions (graph_cid, k, ell, n, rgxf_json, key_id, submitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![graph_cid, k, ell, n, rgxf_json, key_id, now_str],
+            "INSERT INTO graph_submissions (graph_cid, k, ell, n, rgxf_json, key_id, signature, sig_status, commit_hash, submitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![graph_cid, k, ell, n, rgxf_json, identity.key_id, identity.signature, identity.sig_status, identity.commit_hash, now_str],
         ) {
             Ok(_) => false,
             Err(rusqlite::Error::SqliteFailure(err, _))
@@ -124,7 +132,10 @@ impl Ledger {
 
         // 3. Try to admit (only if accepted and score provided)
         let entry = if let Some(score) = score {
-            self.admit_in_tx(&tx, k, ell, n, graph_cid, score, &now_str, key_id)?
+            self.admit_in_tx(
+                &tx, k, ell, n, graph_cid, score, &now_str,
+                identity.key_id, identity.commit_hash,
+            )?
         } else {
             None
         };
@@ -145,6 +156,7 @@ impl Ledger {
         score: &AdmitScore,
         now_str: &str,
         key_id: Option<&str>,
+        commit_hash: Option<&str>,
     ) -> Result<Option<LeaderboardEntry>, LedgerError> {
         // Duplicate check on leaderboard
         let exists: bool = tx
@@ -158,7 +170,7 @@ impl Ledger {
 
         if exists {
             let entry = tx.query_row(
-                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
+                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, commit_hash, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
                 params![k, ell, n, graph_cid],
                 |row: &rusqlite::Row<'_>| {
                     Ok(LeaderboardEntry {
@@ -173,7 +185,8 @@ impl Ledger {
                         tier2_aut: row.get(8)?,
                         score_json: row.get(9)?,
                         key_id: row.get(10)?,
-                        admitted_at: parse_datetime(row.get::<_, String>(11)?),
+                        commit_hash: row.get(11)?,
+                        admitted_at: parse_datetime(row.get::<_, String>(12)?),
                     })
                 },
             )?;
@@ -227,7 +240,7 @@ impl Ledger {
         }
 
         tx.execute(
-            "INSERT INTO leaderboard (k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, tier3_cid, score_json, key_id, admitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT INTO leaderboard (k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, tier3_cid, score_json, key_id, commit_hash, admitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 k, ell, n, graph_cid,
                 self.capacity,
@@ -238,6 +251,7 @@ impl Ledger {
                 score.tier3_cid,
                 score.score_json,
                 key_id,
+                commit_hash,
                 now_str
             ],
         )?;
@@ -245,7 +259,7 @@ impl Ledger {
         recompute_ranks(tx, k, ell, n)?;
 
         let entry = tx.query_row(
-            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
+            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, commit_hash, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
             params![k, ell, n, graph_cid],
             |row: &rusqlite::Row<'_>| {
                 Ok(LeaderboardEntry {
@@ -329,7 +343,7 @@ impl Ledger {
         if exists {
             // Already on the board — return existing entry (no commit needed, read-only)
             let entry = tx.query_row(
-                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
+                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, commit_hash, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
                 params![k, ell, n, graph_cid],
                 |row| {
                     Ok(LeaderboardEntry {
@@ -344,7 +358,8 @@ impl Ledger {
                         tier2_aut: row.get(8)?,
                         score_json: row.get(9)?,
                         key_id: row.get(10)?,
-                        admitted_at: parse_datetime(row.get::<_, String>(11)?),
+                        commit_hash: row.get(11)?,
+                        admitted_at: parse_datetime(row.get::<_, String>(12)?),
                     })
                 },
             )?;
@@ -422,7 +437,7 @@ impl Ledger {
 
         // Read the admitted entry before committing
         let entry = tx.query_row(
-            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
+            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, commit_hash, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 AND graph_cid=?4",
             params![k, ell, n, graph_cid],
             |row| {
                 Ok(LeaderboardEntry {
@@ -506,7 +521,7 @@ impl Ledger {
         let (k, ell) = canonical(k, ell);
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank",
+            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, commit_hash, admitted_at FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank",
         )?;
         let rows = stmt.query_map(params![k, ell, n], |row| {
             Ok(LeaderboardEntry {
@@ -764,7 +779,7 @@ impl Ledger {
         // 3. Get leaderboard entry (optional — may not be admitted)
         let lb_entry: Option<LeaderboardEntry> = conn
             .query_row(
-                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, admitted_at FROM leaderboard WHERE graph_cid = ?1 LIMIT 1",
+                "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, commit_hash, admitted_at FROM leaderboard WHERE graph_cid = ?1 LIMIT 1",
                 params![cid],
                 |row| {
                     Ok(LeaderboardEntry {
@@ -779,7 +794,8 @@ impl Ledger {
                         tier2_aut: row.get(8)?,
                         score_json: row.get(9)?,
                         key_id: row.get(10)?,
-                        admitted_at: parse_datetime(row.get::<_, String>(11)?),
+                        commit_hash: row.get(11)?,
+                        admitted_at: parse_datetime(row.get::<_, String>(12)?),
                     })
                 },
             )

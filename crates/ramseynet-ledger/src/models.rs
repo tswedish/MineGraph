@@ -39,7 +39,18 @@ pub struct LeaderboardEntry {
     pub tier2_aut: f64,
     pub score_json: String,
     pub key_id: Option<String>,
+    pub commit_hash: Option<String>,
     pub admitted_at: DateTime<Utc>,
+}
+
+/// A registered identity.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Identity {
+    pub key_id: String,
+    pub public_key: String,
+    pub display_name: Option<String>,
+    pub github_repo: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 /// A paginated slice of a leaderboard.
