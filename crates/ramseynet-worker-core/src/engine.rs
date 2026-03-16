@@ -250,6 +250,7 @@ pub async fn run_engine(
     event_tx: mpsc::Sender<WorkerEvent>,
     default_server_url: String,
     signing_key_id: Option<String>,
+    commit_hash: Option<String>,
 ) -> Result<(), WorkerError> {
     let mut rng = SmallRng::from_entropy();
     let mut pool_rng = SmallRng::from_entropy();
@@ -326,6 +327,9 @@ pub async fn run_engine(
             if let Some(ref kid) = signing_key_id {
                 c.set_key_id(kid.clone());
             }
+            if let Some(ref ch) = commit_hash {
+                c.set_commit_hash(ch.clone());
+            }
             client = Some(c);
         }
         active_strategy_id = cfg
@@ -375,6 +379,9 @@ pub async fn run_engine(
                                     let mut c = ServerClient::new(&cfg.server_url);
                                     if let Some(ref kid) = signing_key_id {
                                         c.set_key_id(kid.clone());
+                                    }
+                                    if let Some(ref ch) = commit_hash {
+                                        c.set_commit_hash(ch.clone());
                                     }
                                     client = Some(c);
                                 } else {

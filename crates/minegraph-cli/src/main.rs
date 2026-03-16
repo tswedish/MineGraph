@@ -1,11 +1,16 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+#[allow(dead_code)]
 mod config;
+#[allow(dead_code)]
 mod identity;
 
 #[derive(Parser)]
-#[command(name = "minegraph", about = "MineGraph CLI — graph search, identity, and experiments")]
+#[command(
+    name = "minegraph",
+    about = "MineGraph CLI — graph search, identity, and experiments"
+)]
 struct Cli {
     /// Path to project config directory (default: .config/minegraph/ in cwd)
     #[arg(long, global = true)]

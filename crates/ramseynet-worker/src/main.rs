@@ -167,6 +167,10 @@ struct Cli {
     /// If not provided, checks .config/minegraph/key.json in the current directory.
     #[arg(long)]
     signing_key: Option<String>,
+
+    /// Git commit hash to include in submissions (for provenance tracking).
+    #[arg(long)]
+    commit_hash: Option<String>,
 }
 
 #[tokio::main]
@@ -315,6 +319,7 @@ async fn main() -> Result<()> {
         event_tx,
         cli.server.clone(),
         signing_key_id,
+        cli.commit_hash.clone(),
     )
     .await?;
 

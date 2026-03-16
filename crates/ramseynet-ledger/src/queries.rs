@@ -7,6 +7,15 @@ use crate::Ledger;
 
 // ── Submission + Receipt operations ──────────────────────────────────
 
+/// Identity info attached to a submission.
+pub struct SubmitIdentity<'a> {
+    pub key_id: Option<&'a str>,
+    pub signature: Option<&'a str>,
+    /// "anonymous", "verified", "invalid", "unregistered"
+    pub sig_status: &'a str,
+    pub commit_hash: Option<&'a str>,
+}
+
 impl Ledger {
     /// Store a graph submission. Enforces k <= ell canonical form.
     /// Returns `GraphAlreadySubmitted` if the CID exists.
@@ -75,18 +84,8 @@ impl Ledger {
     }
 
     /// Combined store + receipt + admit in a single mutex acquisition and
-    /// single transaction. This eliminates per-operation fsync overhead and
-    /// reduces the number of spawn_blocking calls needed in the server.
-    ///
-    /// Returns `(is_duplicate, Option<LeaderboardEntry>)`.
-    /// Submission identity info passed from the server.
-    pub struct SubmitIdentity<'a> {
-        pub key_id: Option<&'a str>,
-        pub signature: Option<&'a str>,
-        pub sig_status: &'a str, // "anonymous", "verified", "invalid", "unregistered"
-        pub commit_hash: Option<&'a str>,
-    }
-
+    /// Combined store + receipt + admit in a single mutex acquisition and
+    /// single transaction.
     #[allow(clippy::too_many_arguments)]
     pub fn submit_and_admit(
         &self,
@@ -133,8 +132,15 @@ impl Ledger {
         // 3. Try to admit (only if accepted and score provided)
         let entry = if let Some(score) = score {
             self.admit_in_tx(
-                &tx, k, ell, n, graph_cid, score, &now_str,
-                identity.key_id, identity.commit_hash,
+                &tx,
+                k,
+                ell,
+                n,
+                graph_cid,
+                score,
+                &now_str,
+                identity.key_id,
+                identity.commit_hash,
             )?
         } else {
             None
@@ -274,7 +280,8 @@ impl Ledger {
                     tier2_aut: row.get(8)?,
                     score_json: row.get(9)?,
                     key_id: row.get(10)?,
-                    admitted_at: parse_datetime(row.get::<_, String>(11)?),
+                    commit_hash: row.get(11)?,
+                    admitted_at: parse_datetime(row.get::<_, String>(12)?),
                 })
             },
         )?;
@@ -452,7 +459,8 @@ impl Ledger {
                     tier2_aut: row.get(8)?,
                     score_json: row.get(9)?,
                     key_id: row.get(10)?,
-                    admitted_at: parse_datetime(row.get::<_, String>(11)?),
+                    commit_hash: row.get(11)?,
+                    admitted_at: parse_datetime(row.get::<_, String>(12)?),
                 })
             },
         )?;
@@ -536,7 +544,8 @@ impl Ledger {
                 tier2_aut: row.get(8)?,
                 score_json: row.get(9)?,
                 key_id: row.get(10)?,
-                admitted_at: parse_datetime(row.get::<_, String>(11)?),
+                commit_hash: row.get(11)?,
+                admitted_at: parse_datetime(row.get::<_, String>(12)?),
             })
         })?;
         let mut entries = Vec::new();
@@ -565,7 +574,7 @@ impl Ledger {
         )?;
 
         let mut stmt = conn.prepare(
-            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, admitted_at \
+            "SELECT k, ell, n, graph_cid, rank, tier1_max, tier1_min, goodman_gap, tier2_aut, score_json, key_id, commit_hash, admitted_at \
              FROM leaderboard WHERE k=?1 AND ell=?2 AND n=?3 ORDER BY rank LIMIT ?4 OFFSET ?5",
         )?;
         let rows = stmt.query_map(params![k, ell, n, limit, offset], |row| {
@@ -581,7 +590,8 @@ impl Ledger {
                 tier2_aut: row.get(8)?,
                 score_json: row.get(9)?,
                 key_id: row.get(10)?,
-                admitted_at: parse_datetime(row.get::<_, String>(11)?),
+                commit_hash: row.get(11)?,
+                admitted_at: parse_datetime(row.get::<_, String>(12)?),
             })
         })?;
         let mut entries = Vec::new();
@@ -895,6 +905,68 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+}
+
+// ── Identity operations ─────────────────────────────────────────────
+
+impl Ledger {
+    /// Register a public key. Returns the identity (created or existing).
+    pub fn register_key(
+        &self,
+        key_id: &str,
+        public_key: &str,
+        display_name: Option<&str>,
+        github_repo: Option<&str>,
+    ) -> Result<Identity, LedgerError> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().to_rfc3339();
+
+        // Upsert: update display_name/github_repo if key already exists
+        conn.execute(
+            "INSERT INTO identities (key_id, public_key, display_name, github_repo, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(key_id) DO UPDATE SET
+               display_name = COALESCE(?3, display_name),
+               github_repo = COALESCE(?4, github_repo)",
+            params![key_id, public_key, display_name, github_repo, now],
+        )?;
+
+        self.get_identity_inner(&conn, key_id)
+    }
+
+    /// Look up an identity by key_id.
+    pub fn get_identity(&self, key_id: &str) -> Result<Option<Identity>, LedgerError> {
+        let conn = self.conn.lock().unwrap();
+        self.get_identity_inner(&conn, key_id)
+            .map(Some)
+            .or_else(|e| {
+                if matches!(e, LedgerError::Db(rusqlite::Error::QueryReturnedNoRows)) {
+                    Ok(None)
+                } else {
+                    Err(e)
+                }
+            })
+    }
+
+    fn get_identity_inner(
+        &self,
+        conn: &rusqlite::Connection,
+        key_id: &str,
+    ) -> Result<Identity, LedgerError> {
+        conn.query_row(
+            "SELECT key_id, public_key, display_name, github_repo, created_at FROM identities WHERE key_id = ?1",
+            params![key_id],
+            |row| {
+                Ok(Identity {
+                    key_id: row.get(0)?,
+                    public_key: row.get(1)?,
+                    display_name: row.get(2)?,
+                    github_repo: row.get(3)?,
+                    created_at: parse_datetime(row.get::<_, String>(4)?),
+                })
+            },
+        ).map_err(LedgerError::Db)
     }
 }
 

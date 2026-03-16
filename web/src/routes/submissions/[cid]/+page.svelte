@@ -131,6 +131,19 @@
 				</div>
 			{/if}
 			<div class="meta-row">
+				<span class="meta-label">Submitter</span>
+				<span class="meta-value mono">
+					{#if detail.key_id}
+						{detail.key_id.slice(0, 8)}...
+						{#if detail.commit_hash}
+							<span style="color: var(--color-text-muted); font-size: 0.75rem"> @ {detail.commit_hash.slice(0, 7)}</span>
+						{/if}
+					{:else}
+						<span style="color: var(--color-text-muted); font-style: italic">anonymous</span>
+					{/if}
+				</span>
+			</div>
+			<div class="meta-row">
 				<span class="meta-label">Submitted</span>
 				<span class="meta-value">{new Date(detail.submitted_at).toLocaleString()}</span>
 			</div>

@@ -49,6 +49,8 @@ export interface LeaderboardEntry {
 	goodman_gap: number;
 	tier2_aut: number;
 	score_json: string;
+	key_id: string | null;
+	commit_hash: string | null;
 	admitted_at: string;
 }
 
@@ -103,6 +105,8 @@ export interface SubmissionDetail {
 	verified_at: string | null;
 	leaderboard_rank: number | null;
 	score: Record<string, unknown> | null;
+	key_id: string | null;
+	commit_hash: string | null;
 }
 
 // ── API Functions ────────────────────────────────────────────────────

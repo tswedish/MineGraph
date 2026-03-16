@@ -50,6 +50,8 @@ struct SubmitRequest {
     key_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commit_hash: Option<String>,
 }
 
 /// Async HTTP client for the RamseyNet server.
@@ -59,6 +61,8 @@ pub struct ServerClient {
     client: reqwest::Client,
     /// Optional signing key ID to include in submissions.
     key_id: Option<String>,
+    /// Optional commit hash for provenance tracking.
+    commit_hash: Option<String>,
 }
 
 impl ServerClient {
@@ -72,12 +76,18 @@ impl ServerClient {
             base_url: base_url.trim_end_matches('/').to_string(),
             client,
             key_id: None,
+            commit_hash: None,
         }
     }
 
     /// Set the signing key ID for all future submissions.
     pub fn set_key_id(&mut self, key_id: String) {
         self.key_id = Some(key_id);
+    }
+
+    /// Set the commit hash for all future submissions.
+    pub fn set_commit_hash(&mut self, hash: String) {
+        self.commit_hash = Some(hash);
     }
 
     /// Fetch the admission threshold for a (k, ell, n) leaderboard.
@@ -178,7 +188,8 @@ impl ServerClient {
             n,
             graph,
             key_id: self.key_id.clone(),
-            signature: None, // TODO: sign canonical payload when signing key is available
+            signature: None, // TODO: sign canonical payload
+            commit_hash: self.commit_hash.clone(),
         };
 
         let resp = self.client.post(&url).json(&body).send().await?;

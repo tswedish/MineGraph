@@ -328,6 +328,7 @@
 							<th>#</th>
 							<th>Graph</th>
 							<th>CID</th>
+							<th>Submitter</th>
 							<th>C<sub>max</sub></th>
 							<th>C<sub>min</sub></th>
 							<th title="Goodman gap: distance from minimum monochromatic triangles (0 = optimal)">Gap</th>
@@ -348,6 +349,18 @@
 								</td>
 								<td class="cid">
 									<a href="/submissions/{entry.graph_cid}">{entry.graph_cid.slice(0, 16)}...</a>
+								</td>
+								<td class="submitter">
+									{#if entry.key_id}
+										<a href="/api/keys/{entry.key_id}" title={entry.key_id}>
+											{entry.key_id.slice(0, 8)}...
+										</a>
+										{#if entry.commit_hash}
+											<span class="commit" title="commit: {entry.commit_hash}">{entry.commit_hash.slice(0, 7)}</span>
+										{/if}
+									{:else}
+										<span class="anon">anon</span>
+									{/if}
 								</td>
 								<td class="score">{entry.tier1_max}</td>
 								<td class="score">{entry.tier1_min}</td>
@@ -575,6 +588,32 @@
 
 	.cid a:hover {
 		color: var(--color-accent);
+	}
+
+	.submitter {
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+	}
+
+	.submitter a {
+		color: var(--color-accent);
+		text-decoration: none;
+	}
+
+	.submitter a:hover {
+		text-decoration: underline;
+	}
+
+	.submitter .anon {
+		color: var(--color-text-muted);
+		font-style: italic;
+	}
+
+	.submitter .commit {
+		display: block;
+		font-size: 0.625rem;
+		color: var(--color-text-muted);
+		margin-top: 0.125rem;
 	}
 
 	.score {
