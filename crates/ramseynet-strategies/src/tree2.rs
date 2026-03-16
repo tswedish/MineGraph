@@ -356,9 +356,13 @@ impl SearchStrategy for Tree2Search {
             candidates.sort_by_key(|&(_, _, v, _, _)| v);
             candidates.truncate(beam_width);
 
-            // Materialize the new beam: clone parent + apply flip + rebuild masks
+            // Materialize the new beam: clone parent + apply flip + rebuild masks.
+            // Trust the incremental kc/ei values (verified by tests against
+            // the scalar oracle). Full recount only every 5 depths for drift
+            // correction.
+            let do_full_recount = depth.is_multiple_of(5);
             let mut new_beam: Vec<BeamEntry> = Vec::with_capacity(candidates.len());
-            for &(parent_idx, edge_idx, _new_v, _new_kc, _new_ei) in &candidates {
+            for &(parent_idx, edge_idx, _new_v, new_kc, new_ei) in &candidates {
                 let (u, v) = all_edges[edge_idx];
                 let parent = &beam[parent_idx];
                 let mut graph = parent.graph.clone();
@@ -367,13 +371,17 @@ impl SearchStrategy for Tree2Search {
                 graph.set_edge(u, v, !cur);
                 comp.set_edge(u, v, cur);
 
-                // Build neighbor masks from the new graph state
                 let adj_nbrs = NeighborSet::from_adj(&graph);
                 let comp_nbrs = NeighborSet::from_adj(&comp);
 
-                // Full recount for beam entries to prevent drift
-                let kc = count_cliques(&graph, k);
-                let ei = count_cliques(&comp, ell);
+                let (kc, ei) = if do_full_recount {
+                    // Full recount to correct any accumulated drift
+                    (count_cliques(&graph, k), count_cliques(&comp, ell))
+                } else {
+                    // Trust incremental values — no expensive recount
+                    (new_kc, new_ei)
+                };
+
                 new_beam.push(BeamEntry {
                     graph,
                     comp,
