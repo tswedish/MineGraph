@@ -33,140 +33,7 @@ use ramseynet_worker_api::{
     SearchStrategy,
 };
 
-// ── Incremental violation counting ──────────────────────────────────
-
-/// Count k-cliques that contain BOTH vertices u and v.
-/// This is the delta-relevant set when edge (u,v) is flipped.
-/// Returns 0 if edge (u,v) is not present (no clique can contain a non-edge).
-fn count_cliques_through_edge(adj: &AdjacencyMatrix, k: u32, u: u32, v: u32) -> u64 {
-    if k < 2 {
-        return 0;
-    }
-    // A clique through (u,v) requires the edge (u,v) to exist
-    if !adj.edge(u, v) {
-        return 0;
-    }
-    if k == 2 {
-        return 1;
-    }
-    let n = adj.n();
-    // Find common neighbors of u and v (candidates for remaining k-2 vertices)
-    let common: Vec<u32> = (0..n)
-        .filter(|&w| w != u && w != v && adj.edge(u, w) && adj.edge(v, w))
-        .collect();
-
-    if (common.len() as u32) < k - 2 {
-        return 0;
-    }
-
-    // Count (k-2)-cliques among the common neighbors
-    let mut count = 0u64;
-    let mut current = Vec::with_capacity((k - 2) as usize);
-    count_cliques_in_subset(adj, &common, &mut current, 0, k - 2, &mut count);
-    count
-}
-
-/// Count cliques of size `target` using only vertices from `candidates`.
-fn count_cliques_in_subset(
-    adj: &AdjacencyMatrix,
-    candidates: &[u32],
-    current: &mut Vec<u32>,
-    start: usize,
-    target: u32,
-    count: &mut u64,
-) {
-    if current.len() as u32 == target {
-        *count += 1;
-        return;
-    }
-    let remaining = target - current.len() as u32;
-    if candidates.len() - start < remaining as usize {
-        return;
-    }
-    for i in start..candidates.len() {
-        let v = candidates[i];
-        if current.iter().all(|&u| adj.edge(u, v)) {
-            current.push(v);
-            count_cliques_in_subset(adj, candidates, current, i + 1, target, count);
-            current.pop();
-        }
-    }
-}
-
-/// Compute the change in violation score from flipping edge (u,v).
-///
-/// Takes both the graph and its pre-built complement to avoid allocations.
-/// The caller is responsible for keeping `comp` in sync with `adj`.
-///
-/// Returns (delta_kc, delta_ei): the change in k-clique count and
-/// ell-independent-set count. These can be negative (improvement).
-fn violation_delta(
-    adj: &AdjacencyMatrix,
-    comp: &AdjacencyMatrix,
-    k: u32,
-    ell: u32,
-    u: u32,
-    v: u32,
-) -> (i64, i64) {
-    let edge_present = adj.edge(u, v);
-
-    // k-cliques through (u,v) in G: only exist if edge is present
-    let kc_before = count_cliques_through_edge(adj, k, u, v) as i64;
-
-    // ell-cliques through (u,v) in complement: only exist if complement edge is present
-    let ei_before = count_cliques_through_edge(comp, ell, u, v) as i64;
-
-    if edge_present {
-        // Removing edge from G: all k-cliques through (u,v) are destroyed.
-        // Adding edge to complement: need to count new ell-cliques.
-        // After flip, complement has the (u,v) edge. Count cliques in
-        // the "after" complement by temporarily considering (u,v) present.
-        // The common-neighbor set doesn't change (other edges unchanged),
-        // so we can count directly with a modified adjacency check.
-        let ei_after = count_cliques_through_edge_assuming(comp, ell, u, v, true) as i64;
-        (-kc_before, ei_after - ei_before)
-    } else {
-        // Adding edge to G: need to count new k-cliques.
-        // Removing edge from complement: all ell-cliques through (u,v) destroyed.
-        let kc_after = count_cliques_through_edge_assuming(adj, k, u, v, true) as i64;
-        (kc_after - kc_before, -ei_before)
-    }
-}
-
-/// Count k-cliques through (u,v) assuming the (u,v) edge has a specific state.
-/// This avoids mutating or cloning the adjacency matrix.
-fn count_cliques_through_edge_assuming(
-    adj: &AdjacencyMatrix,
-    k: u32,
-    u: u32,
-    v: u32,
-    edge_present: bool,
-) -> u64 {
-    if k < 2 {
-        return 0;
-    }
-    if !edge_present {
-        return 0;
-    }
-    if k == 2 {
-        return 1;
-    }
-    let n = adj.n();
-    // Common neighbors: for the (u,v) edge we're "assuming", the other
-    // edges are read from the actual adjacency matrix unchanged.
-    let common: Vec<u32> = (0..n)
-        .filter(|&w| w != u && w != v && adj.edge(u, w) && adj.edge(v, w))
-        .collect();
-
-    if (common.len() as u32) < k - 2 {
-        return 0;
-    }
-
-    let mut count = 0u64;
-    let mut current = Vec::with_capacity((k - 2) as usize);
-    count_cliques_in_subset(adj, &common, &mut current, 0, k - 2, &mut count);
-    count
-}
+use crate::incremental::violation_delta;
 
 /// Violation score: total k-cliques + ell-independent-sets.
 /// An independent set of size ell in G is a clique of size ell in complement(G).
@@ -668,6 +535,7 @@ fn random_graph(n: u32, rng: &mut SmallRng) -> AdjacencyMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::incremental::count_cliques_through_edge;
     use ramseynet_worker_api::observer::NoOpObserver;
     use std::collections::HashSet;
 

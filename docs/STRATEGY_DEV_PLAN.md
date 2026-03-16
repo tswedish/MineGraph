@@ -3,7 +3,7 @@
 Living document for developing new search strategies, running them against prod,
 and evolving toward agentic strategy iteration.
 
-**Status:** Phase 1 — EvoSearch implemented, testing against R(5,5) n=25
+**Status:** Phase 1 — Tree2 + EvoSearch implemented, testing against R(5,5) n=25
 
 ---
 
@@ -122,6 +122,50 @@ counts, and discovery count every 500 iterations.
   triangle count as Goodman gap proxy to guide toward better-scoring graphs
 - **Adaptive temperature:** adjust based on acceptance rate rather than fixed schedule
 - **Multi-flip mutations:** flip k edges at once, with k adaptive to plateau detection
+
+---
+
+## Tree2: Incremental Beam Search — Implemented
+
+### What was built
+
+**Tree2Search** (`crates/ramseynet-strategies/src/tree2.rs`): Same beam search
+skeleton as tree1, but with three key optimizations making each candidate
+evaluation ~10-30x cheaper.
+
+**Key differences from tree1:**
+
+| Aspect | tree1 | tree2 |
+|--------|-------|-------|
+| Candidate eval | Clone parent + full `count_cliques` x2 + complement | Flip-in-place + incremental delta + unflip |
+| Dedup | SHA-256 CID (~200ns) | 64-bit XOR-fold fingerprint (~5ns) |
+| Complement | Rebuilt from scratch per candidate | Carried per beam entry, maintained incrementally |
+| Allocations per candidate | 1 clone + 1 complement | 0 (flip-score-unflip in place) |
+| Full CID computation | Every candidate | Only valid discoveries |
+| Full recount | Never (trusts incremental) | Once per beam entry when materializing new beam |
+
+**Shared infrastructure:** Incremental violation counting functions extracted
+into `crates/ramseynet-strategies/src/incremental.rs`, shared between evo and
+tree2: `violation_delta`, `count_cliques_through_edge`,
+`count_cliques_through_edge_assuming`, `fast_fingerprint`.
+
+**Debug logging:** Per-depth-level summary via `tracing::debug!`:
+```
+tree2: depth complete depth=3 beam_size=100 candidates=28500 dedup_hits=1200
+  best_score=2 worst_score=15 discoveries=0 seen_set=85000 elapsed_ms=340
+```
+Visible with `RUST_LOG=ramseynet_strategies=debug` or `./run search -v`.
+
+### Tree2 Improvement Roadmap
+
+| Version | Change | Expected Impact |
+|---------|--------|----------------|
+| **v0** (done) | Incremental delta + flip-score-unflip + cheap fingerprint + complement per beam entry | ~10-30x faster per candidate eval |
+| **v1** | Diversity-aware beam selection (keep structurally diverse candidates, not just lowest score) | Better exploration of different graph basins |
+| **v2** | Multi-flip mutations (flip 2-3 edges per candidate) | Escape local minima, deeper search per depth |
+| **v3** | Adaptive beam width (widen on score plateaus, narrow when one dominates) | Better resource allocation |
+| **v4** | Carry state across rounds (persist beam as population) | Continuous improvement like evo |
+| **v5** | Hybrid: beam search to find valid graphs, then SA refinement within valid space | Optimize score tiers, not just find valid graphs |
 
 ---
 
