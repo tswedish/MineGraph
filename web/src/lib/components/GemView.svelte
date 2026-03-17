@@ -109,7 +109,7 @@
 		// Wave: |cMax - cMin| controls spatial sine frequency for lightness
 		const diff = Math.abs(cMax - cMin);
 		const waveFreq = diff * 1.5;
-		const waveAmp = diff === 0 ? 0 : Math.min(0.25, 0.08 + diff * 0.035);
+		const waveAmp = diff === 0 ? 0 : Math.min(0.40, 0.15 + diff * 0.06);
 		const waveDx = Math.cos(waveAngle);
 		const waveDy = Math.sin(waveAngle);
 
