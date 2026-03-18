@@ -164,7 +164,7 @@ struct Cli {
     max_depth: u32,
 
     /// Enable focused edge flipping (only mutate edges in violations)
-    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
     focused: bool,
 
     /// Path to MineGraph signing key (JSON file with key_id + secret_key).

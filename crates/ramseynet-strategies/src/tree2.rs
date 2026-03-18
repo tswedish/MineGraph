@@ -108,7 +108,7 @@ impl SearchStrategy for Tree2Search {
                 label: "Focused Edges".into(),
                 description: "Only flip edges participating in violations (Exoo-Tatarevic)".into(),
                 param_type: ParamType::Bool,
-                default: serde_json::json!(true),
+                default: serde_json::json!(false),
             },
         ]
     }
@@ -128,7 +128,7 @@ impl SearchStrategy for Tree2Search {
             .config
             .get("focused")
             .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+            .unwrap_or(false);
 
         let n = job.n;
         let k = job.k;
