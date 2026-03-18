@@ -163,6 +163,10 @@ struct Cli {
     #[arg(long, default_value = "10")]
     max_depth: u32,
 
+    /// Enable focused edge flipping (only mutate edges in violations)
+    #[arg(long, default_value = "true")]
+    focused: bool,
+
     /// Path to MineGraph signing key (JSON file with key_id + secret_key).
     /// If not provided, checks .config/minegraph/key.json in the current directory.
     #[arg(long)]
@@ -242,6 +246,7 @@ async fn main() -> Result<()> {
             strategy_config: serde_json::json!({
                 "beam_width": cli.beam_width,
                 "max_depth": cli.max_depth,
+                "focused": cli.focused,
             }),
             server_url: cli.server.clone(),
         })
