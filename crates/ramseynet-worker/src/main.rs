@@ -329,10 +329,16 @@ async fn main() -> Result<()> {
     let metadata = {
         let mut meta = serde_json::Map::new();
         if let Some(ref ch) = cli.commit_hash {
-            meta.insert("commit_hash".to_string(), serde_json::Value::String(ch.clone()));
+            meta.insert(
+                "commit_hash".to_string(),
+                serde_json::Value::String(ch.clone()),
+            );
         }
         if let Some(wid) = cli.worker_id {
-            meta.insert("worker_id".to_string(), serde_json::Value::Number(wid.into()));
+            meta.insert(
+                "worker_id".to_string(),
+                serde_json::Value::Number(wid.into()),
+            );
         }
         if meta.is_empty() {
             None
