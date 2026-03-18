@@ -16,7 +16,7 @@
 		size?: number;
 		label?: string;
 		graphCid?: string;
-		/** Goodman gap — 0 = uniform hue, higher = noisier hue per cell */
+		/** Goodman gap — 0 = flat lightness, higher = more lightness bands */
 		goodmanGap?: number;
 		cMax?: number;
 		cMin?: number;
@@ -106,16 +106,18 @@
 
 		const hues = buildPalette(baseHue, colorCount);
 
-		// Wave: |cMax - cMin| controls spatial sine frequency for lightness
-		const diff = Math.abs(cMax - cMin);
-		const waveFreq = diff * 1.5;
-		const waveAmp = diff === 0 ? 0 : Math.min(0.40, 0.15 + diff * 0.06);
+		// Wave: goodman gap controls spatial sine frequency for lightness
+		// gap=0 → flat (no bands), gap=N → N visible bands
+		const waveFreq = goodmanGap * 1.5;
+		const waveAmp = goodmanGap === 0 ? 0 : Math.min(0.40, 0.15 + goodmanGap * 0.06);
 		const waveDx = Math.cos(waveAngle);
 		const waveDy = Math.sin(waveAngle);
 
-		// Hue noise from goodman gap: how much each cell's hue drifts from palette
-		// gap=0 → 0 drift (pure uniform color), gap=1 → slight, gap>=5 → near random
-		const hueNoise = Math.min(0.5, goodmanGap * 0.10);
+		// Hue noise from |cMax - cMin|: how much each cell's hue drifts from palette
+		// diff=0 → 0 drift (monochrome for aut=1, clean palette otherwise)
+		// higher diff → noisier, more scattered hue
+		const diff = Math.abs(cMax - cMin);
+		const hueNoise = Math.min(0.5, diff * 0.10);
 
 		// Deterministic per-cell hash for hue noise (returns -0.5..+0.5)
 		function cellHash(i: number, j: number): number {
@@ -152,11 +154,11 @@
 					const hueIdx = Math.floor(diag * hues.length * 0.999);
 					const h = hues[Math.min(hueIdx, hues.length - 1)];
 
-					// Add per-cell hue noise scaled by goodman gap
-					const drift = cellHash(i, j) * hueNoise;
-					const finalHue = h + drift;
+				// Add per-cell hue noise scaled by |cMax - cMin|
+				const drift = cellHash(i, j) * hueNoise;
+				const finalHue = h + drift;
 
-					// Lightness wave from cMax-cMin difference
+				// Lightness wave from goodman gap
 					const normX = gx / (gridW - 1);
 					const normY = gy / (gridW - 1);
 					const proj = normX * waveDx + normY * waveDy;

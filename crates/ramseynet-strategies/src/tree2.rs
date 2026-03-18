@@ -226,29 +226,35 @@ impl SearchStrategy for Tree2Search {
             let mut candidates: Vec<(usize, u32, u32, u64, u64, u64)> = Vec::new();
             let mut dedup_hits: u64 = 0;
             let mut scored_count: u64 = 0;
-            let mut focused_edge_count: u64 = 0;
             let beam_len = beam.len();
 
-            for (parent_idx, parent) in beam.iter_mut().enumerate() {
-                if iters_used >= max_iters || observer.is_cancelled() {
-                    break;
-                }
-
-                // Determine which edges to try for this parent
-                let parent_edges: Vec<(u32, u32)> = if focused && parent.violations > 0 {
-                    // Focused mode: only edges participating in violations
-                    let ge = guilty_edges(&parent.adj_nbrs, &parent.comp_nbrs, k, ell, n);
+            // Focused mode: compute guilty edges ONCE per depth from the best
+            // beam entry (lowest violations). All parents at this depth share
+            // the same focused edge set. This amortizes the clique enumeration
+            // cost (1 call per depth vs 80 calls per depth).
+            let depth_edges: Vec<(u32, u32)> = if focused {
+                let best = beam.iter().min_by_key(|e| e.violations).unwrap();
+                if best.violations > 0 {
+                    let ge = guilty_edges(&best.adj_nbrs, &best.comp_nbrs, k, ell, n);
                     if ge.is_empty() {
-                        // Shouldn't happen if violations > 0, but fall back
                         all_edges.clone()
                     } else {
                         ge
                     }
                 } else {
                     all_edges.clone()
-                };
-                let parent_edge_count = parent_edges.len();
-                focused_edge_count += parent_edge_count as u64;
+                }
+            } else {
+                all_edges.clone()
+            };
+            let depth_edge_count = depth_edges.len();
+
+            for (parent_idx, parent) in beam.iter_mut().enumerate() {
+                if iters_used >= max_iters || observer.is_cancelled() {
+                    break;
+                }
+
+                let parent_edge_count = depth_edge_count;
 
                 // Budget: limit edges per parent if iteration budget is tight
                 let edges_to_try = {
@@ -266,9 +272,9 @@ impl SearchStrategy for Tree2Search {
                 let edges_iter: Vec<(u32, u32)> = if edges_to_try < parent_edge_count {
                     let mut indices: Vec<usize> = (0..parent_edge_count).collect();
                     let (selected, _) = indices.partial_shuffle(&mut rng, edges_to_try);
-                    selected.iter().map(|&i| parent_edges[i]).collect()
+                    selected.iter().map(|&i| depth_edges[i]).collect()
                 } else {
-                    parent_edges
+                    depth_edges.clone()
                 };
 
                 for &(u, v) in &edges_iter {
@@ -427,12 +433,6 @@ impl SearchStrategy for Tree2Search {
             let best_score = new_beam.first().map(|e| e.violations).unwrap_or(0);
             let worst_score = new_beam.last().map(|e| e.violations).unwrap_or(0);
 
-            let avg_edges = if beam_len > 0 {
-                focused_edge_count / beam_len as u64
-            } else {
-                0
-            };
-
             debug!(
                 depth,
                 beam_size = new_beam.len(),
@@ -443,7 +443,7 @@ impl SearchStrategy for Tree2Search {
                 discoveries = discovery_count,
                 seen_set = seen.len(),
                 focused,
-                avg_edges_per_parent = avg_edges,
+                edges_per_parent = depth_edge_count,
                 elapsed_ms = depth_elapsed.as_millis() as u64,
                 "tree2: depth complete"
             );
