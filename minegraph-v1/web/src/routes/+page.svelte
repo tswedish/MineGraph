@@ -100,9 +100,9 @@
 					{:else}
 						<span class="badge badge-amber">sub</span>
 					{/if}
-					<a href="/submissions/{event.cid}" class="mono event-cid">{event.cid.slice(0, 12)}...</a>
-					<span class="event-meta">n={event.n}</span>
-					<span class="event-key mono">{event.key_id.slice(0, 8)}</span>
+					<a href="/submissions/{event.cid}" class="mono event-cid">{event.cid?.slice(0, 12)}...</a>
+					<a href="/leaderboards/{event.n}" class="event-meta">n={event.n}</a>
+					<a href="/identities/{event.key_id}" class="event-key mono">{event.key_id?.slice(0, 8)}</a>
 				</div>
 			{/each}
 		</div>

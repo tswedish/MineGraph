@@ -519,24 +519,29 @@ impl Store {
     // ── Snapshot operations ─────────────────────────────────
 
     /// Capture a leaderboard snapshot (called periodically by background task).
+    ///
+    /// total_score = sum(goodman_gap) + sum(all red + blue clique counts from histogram tiers)
+    /// This matches the UI's cumulative "Score" badge.
     pub async fn capture_snapshot(&self, n: i32) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO leaderboard_snapshots
-                (n, entry_count, best_gap, worst_gap, median_gap, avg_gap,
-                 best_aut, avg_aut, total_k4_red, total_k4_blue, total_k5_red, total_k5_blue)
+                (n, entry_count, total_score, best_gap, worst_gap, median_gap, avg_gap,
+                 best_aut, avg_aut)
              SELECT
                 $1,
                 COUNT(*)::int,
+                COALESCE(SUM(s.goodman_gap)::bigint, 0)
+                    + COALESCE((SELECT SUM((t->>'red')::bigint + (t->>'blue')::bigint)
+                        FROM leaderboard l2
+                        JOIN scores s2 ON l2.cid = s2.cid,
+                        jsonb_array_elements(s2.histogram->'tiers') AS t
+                        WHERE l2.n = $1), 0),
                 MIN(s.goodman_gap),
                 MAX(s.goodman_gap),
                 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY s.goodman_gap),
                 AVG(s.goodman_gap),
                 MAX(s.aut_order),
-                AVG(s.aut_order),
-                COALESCE(SUM((s.histogram->'tiers'->1->>'red')::bigint), 0),
-                COALESCE(SUM((s.histogram->'tiers'->1->>'blue')::bigint), 0),
-                COALESCE(SUM((s.histogram->'tiers'->2->>'red')::bigint), 0),
-                COALESCE(SUM((s.histogram->'tiers'->2->>'blue')::bigint), 0)
+                AVG(s.aut_order)
              FROM leaderboard l
              JOIN scores s ON l.cid = s.cid
              WHERE l.n = $1",
@@ -595,6 +600,30 @@ impl Store {
                 .await?;
 
         Ok((sub_count, admit_count))
+    }
+
+    /// Get leaderboard entries by identity with computed ranks.
+    pub async fn get_identity_leaderboard_entries(
+        &self,
+        key_id: &str,
+    ) -> Result<Vec<models::IdentityLeaderboardEntry>, StoreError> {
+        let rows = sqlx::query_as::<_, models::IdentityLeaderboardEntry>(
+            "SELECT ranked.n, ranked.rank::int, ranked.cid, g.graph6,
+                    s.goodman_gap, s.aut_order
+             FROM (
+                SELECT l.n, l.cid, l.score_bytes, l.key_id,
+                       ROW_NUMBER() OVER (PARTITION BY l.n ORDER BY l.score_bytes ASC) AS rank
+                FROM leaderboard l
+             ) ranked
+             JOIN graphs g ON ranked.cid = g.cid
+             LEFT JOIN scores s ON ranked.cid = s.cid
+             WHERE ranked.key_id = $1
+             ORDER BY ranked.n, ranked.rank",
+        )
+        .bind(key_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
     }
 
     // ── Export ───────────────────────────────────────────────

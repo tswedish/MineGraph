@@ -80,7 +80,7 @@
 				<h3>Identity</h3>
 				<dl>
 					<dt>Key ID</dt>
-					<dd class="mono">{detail.submission.key_id}</dd>
+					<dd class="mono"><a href="/identities/{detail.submission.key_id}">{detail.submission.key_id}</a></dd>
 					<dt>Submitted</dt>
 					<dd>{new Date(detail.submission.created_at).toLocaleString()}</dd>
 				</dl>

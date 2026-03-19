@@ -91,17 +91,25 @@ pub struct LeaderboardSnapshot {
     pub id: i64,
     pub n: i32,
     pub entry_count: i32,
+    pub total_score: i64,
     pub best_gap: Option<f64>,
     pub worst_gap: Option<f64>,
     pub median_gap: Option<f64>,
     pub avg_gap: Option<f64>,
     pub best_aut: Option<f64>,
     pub avg_aut: Option<f64>,
-    pub total_k4_red: Option<i64>,
-    pub total_k4_blue: Option<i64>,
-    pub total_k5_red: Option<i64>,
-    pub total_k5_blue: Option<i64>,
     pub snapshot_at: DateTime<Utc>,
+}
+
+/// Identity's entry on a leaderboard, with rank.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct IdentityLeaderboardEntry {
+    pub n: i32,
+    pub rank: i32,
+    pub cid: String,
+    pub graph6: String,
+    pub goodman_gap: Option<f64>,
+    pub aut_order: Option<f64>,
 }
 
 /// A verification receipt signed by the server.

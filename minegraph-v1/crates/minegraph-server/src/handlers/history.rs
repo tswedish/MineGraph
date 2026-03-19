@@ -37,16 +37,13 @@ pub async fn get_history(
             json!({
                 "t": s.snapshot_at.to_rfc3339(),
                 "count": s.entry_count,
+                "total_score": s.total_score,
                 "best_gap": s.best_gap,
                 "worst_gap": s.worst_gap,
                 "median_gap": s.median_gap,
                 "avg_gap": s.avg_gap,
                 "best_aut": s.best_aut,
                 "avg_aut": s.avg_aut,
-                "k4_red": s.total_k4_red,
-                "k4_blue": s.total_k4_blue,
-                "k5_red": s.total_k5_red,
-                "k5_blue": s.total_k5_blue,
             })
         })
         .collect();

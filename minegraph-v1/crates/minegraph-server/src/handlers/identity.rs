@@ -55,12 +55,34 @@ pub async fn get_key(
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("key {key_id}")))?;
 
+    let (sub_count, _) = state.store.get_identity_stats(&key_id).await?;
+    let lb_entries = state
+        .store
+        .get_identity_leaderboard_entries(&key_id)
+        .await?;
+
+    let lb_json: Vec<Value> = lb_entries
+        .iter()
+        .map(|e| {
+            json!({
+                "n": e.n,
+                "rank": e.rank,
+                "cid": e.cid,
+                "graph6": e.graph6,
+                "goodman_gap": e.goodman_gap,
+                "aut_order": e.aut_order,
+            })
+        })
+        .collect();
+
     Ok(Json(json!({
         "key_id": identity.key_id,
         "public_key": identity.public_key,
         "display_name": identity.display_name,
         "github_repo": identity.github_repo,
         "created_at": identity.created_at.to_rfc3339(),
+        "total_submissions": sub_count,
+        "leaderboard_entries": lb_json,
     })))
 }
 

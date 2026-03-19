@@ -123,9 +123,9 @@
 						{/if}
 					</div>
 					<div class="worker-meta">
-						<span>n={w.n}</span>
+						<a href="/leaderboards/{w.n}">n={w.n}</a>
 						<span class="dim">{w.strategy}</span>
-						<span class="dim">key:{w.key_id.slice(0, 8)}</span>
+						<a href="/identities/{w.key_id}" class="dim">key:{w.key_id.slice(0, 8)}</a>
 					</div>
 					<div class="worker-stats">
 						<div class="ws-row">
@@ -191,9 +191,9 @@
 			{#each recentAdmissions.slice(0, 20) as event}
 				<div class="admission-row">
 					<span class="badge badge-green">#{event.rank}</span>
-					<a href="/submissions/{event.cid}" class="mono cid-link">{event.cid.slice(0, 16)}...</a>
-					<span class="dim">n={event.n}</span>
-					<span class="dim mono">{event.key_id.slice(0, 8)}</span>
+					<a href="/submissions/{event.cid}" class="mono cid-link">{event.cid?.slice(0, 16)}...</a>
+					<a href="/leaderboards/{event.n}" class="dim">n={event.n}</a>
+					<a href="/identities/{event.key_id}" class="dim mono">{event.key_id?.slice(0, 8)}</a>
 				</div>
 			{/each}
 		</div>

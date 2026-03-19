@@ -104,6 +104,7 @@ export interface WorkerStats {
 export interface HistorySnapshot {
 	t: string;
 	count: number;
+	total_score: number;
 	best_gap: number | null;
 	worst_gap: number | null;
 	median_gap: number | null;

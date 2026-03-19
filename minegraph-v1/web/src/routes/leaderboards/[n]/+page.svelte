@@ -41,6 +41,7 @@
 		return () => clearInterval(interval);
 	});
 
+	// Hard load: used for page navigation (shows loading shimmer)
 	async function loadPage(page: number) {
 		loading = true;
 		try {
@@ -52,6 +53,24 @@
 		loading = false;
 	}
 
+	// Soft refresh: used for SSE updates (no loading shimmer, no flicker)
+	let refreshPending = false;
+	async function softRefresh() {
+		if (refreshPending) return; // debounce
+		refreshPending = true;
+		try {
+			const d = await getLeaderboard(n, PAGE_SIZE, currentPage * PAGE_SIZE);
+			// Only update if data actually changed
+			const newCids = (d.entries as RichEntry[]).map(e => e.cid).join(',');
+			const oldCids = entries.map(e => e.cid).join(',');
+			if (newCids !== oldCids) {
+				entries = d.entries as RichEntry[];
+			}
+			total = d.total;
+		} catch { /* ignore */ }
+		refreshPending = false;
+	}
+
 	function goNext() { if (canNext) loadPage(currentPage + 1); }
 	function goPrev() { if (canPrev) loadPage(currentPage - 1); }
 	function goFirst() { loadPage(0); }
@@ -60,7 +79,8 @@
 	// Initial load
 	$effect(() => { loadPage(0); });
 
-	// SSE: refresh top of leaderboard on admission (don't append)
+	// SSE: soft-refresh on admission (debounced, no flicker)
+	let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {
 		const unsub = subscribeEvents((event) => {
 			if (event.n === n && event.type === 'admission') {
@@ -68,8 +88,9 @@
 				admitTimestamps.push(Date.now());
 				admitTimestamps = admitTimestamps.filter(t => t > Date.now() - 60000);
 				admitsPerMinute = admitTimestamps.length;
-				// Refresh current page
-				loadPage(currentPage);
+				// Debounce: wait 2s after last admission before refreshing
+				if (refreshTimer) clearTimeout(refreshTimer);
+				refreshTimer = setTimeout(softRefresh, 2000);
 			}
 		});
 		return unsub;
@@ -177,13 +198,14 @@
 		<div class="history-chart">
 			<table class="history-table">
 				<thead><tr>
-					<th>Time</th><th>Count</th><th>Best Gap</th><th>Median Gap</th><th>Avg Gap</th><th>Best |Aut|</th>
+					<th>Time</th><th>Count</th><th>Score</th><th>Best Gap</th><th>Med Gap</th><th>Avg Gap</th><th>Best |Aut|</th>
 				</tr></thead>
 				<tbody>
 					{#each historyData as snap}
 						<tr>
 							<td class="mono tc">{new Date(snap.t).toLocaleTimeString()}</td>
 							<td class="mono sc">{snap.count}</td>
+							<td class="mono" style="color: var(--color-accent); font-weight: 600;">{snap.total_score.toLocaleString()}</td>
 							<td class="mono sc">{snap.best_gap ?? '—'}</td>
 							<td class="mono sc">{snap.median_gap?.toFixed(1) ?? '—'}</td>
 							<td class="mono sc">{snap.avg_gap?.toFixed(1) ?? '—'}</td>
@@ -264,7 +286,7 @@
 							</td>
 							<td class="mono sc">{entry.goodman_gap ?? '—'}</td>
 							<td class="mono sc">{entry.aut_order ?? '—'}</td>
-							<td class="mono dm">{entry.key_id.slice(0, 8)}</td>
+							<td class="mono dm"><a href="/identities/{entry.key_id}" onclick={(e) => e.stopPropagation()}>{entry.key_id.slice(0, 8)}</a></td>
 							<td class="mono tc" title={new Date(entry.admitted_at).toLocaleString()}>{timeAgo(entry.admitted_at)}</td>
 						</tr>
 					{/each}
