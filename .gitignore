@@ -4,6 +4,7 @@
 
 # Logs
 logs/
+experiments/
 
 # Node / SvelteKit
 node_modules/
