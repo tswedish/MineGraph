@@ -1,5 +1,7 @@
 # MineGraph — Next Steps
 
+NOTE: THIS NEEDS TO BE UPDATED WITH NEW MINEGRAPHV1 IMPLEMENTATION
+
 Current state as of 2026-03-17.
 
 ## Where We Are
