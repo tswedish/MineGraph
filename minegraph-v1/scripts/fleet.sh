@@ -89,7 +89,7 @@ trap cleanup INT TERM
 for i in $(seq 1 "$WORKERS"); do
     LOG_FILE="$LOG_DIR/worker-$i.log"
     echo "Starting worker $i -> $LOG_FILE"
-    RUST_LOG=info "$WORKER_BIN" \
+    NO_COLOR=1 RUST_LOG=info "$WORKER_BIN" \
         --server "$SERVER" \
         --n "$N" \
         --target-k "$TARGET_K" \

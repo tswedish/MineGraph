@@ -190,7 +190,7 @@
 							<td><a href="/submissions/{entry.cid}" class="mono cc">{entry.cid.slice(0, 12)}</a></td>
 							<td class="hist-cell">
 								{#if entry.histogram?.tiers}
-									{#each entry.histogram.tiers.filter(t => t.k > 3) as t}
+									{#each entry.histogram.tiers as t}
 										<span class="hist-tier" title="k={t.k}: red={t.red} blue={t.blue}">
 											<span class="hist-k">k{t.k}</span>
 											<span class="red">{t.red}</span><span class="hist-sep">/</span><span class="blue">{t.blue}</span>
