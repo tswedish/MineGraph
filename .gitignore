@@ -1,21 +1,20 @@
-# Rust
-/target/
-**/*.rs.bk
+# Environment / secrets
+.env
+.config/
+
+# Logs
+logs/
+experiments/
 
 # Node / SvelteKit
 node_modules/
-.svelte-kit/
+web/node_modules/
 web/.svelte-kit/
 web/build/
-.vite/
-.env
-.env.*
 
-# SQLite
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
+# Rust
+/target/
+**/*.rs.bk
 
 # OS
 .DS_Store
@@ -37,16 +36,5 @@ Desktop.ini
 .playwright/
 .playwright-cli/
 
-# Logs
-logs/
-
 # Screenshots (dev artifacts)
 *.png
-
-# Root-level dev artifacts
-/package.json
-/package-lock.json
-/challenges-snap.yaml
-*.yml
-.venv/
-gems/

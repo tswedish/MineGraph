@@ -1,23 +1,107 @@
 #!/usr/bin/env bash
-# RamseyNet dev runner
-#
-# Usage: ./run <command> [--release] [options...]
-#
-# Commands:
-#   ci         Full CI: clippy + tests + web build
-#   test       cargo test --all
-#   clippy     cargo clippy --all-targets
-#   build      cargo build --all
-#   web        pnpm install && pnpm build (in web/)
-#   web-dev    pnpm dev (live reload on :5173)
-#   server     API server on :3001
-#   server-log API server with file logging (logs/)
-#   search     Search worker (--k, --ell, --n for auto-start; omit for idle mode)
-#   bench      Criterion benchmarks for verifier/scoring
-#   seed       Seed DB with test graphs
-#   experiment Head-to-head strategy experiment (--a tree --b tree2)
-#   fleet      Launch N workers (--workers 16 --strategy tree2)
-#
-# Add --release to build/server/search for optimized (5-20x faster) builds.
+# MineGraph v1 task runner
+set -euo pipefail
+cd "$(dirname "$0")"
 
-bash "$(dirname "$0")/scripts/wsl-dev.sh" "$@"
+RELEASE=""
+EXTRA_ARGS=()
+
+# Extract --release flag
+for arg in "$@"; do
+    if [[ "$arg" == "--release" ]]; then
+        RELEASE="--release"
+    fi
+done
+
+cmd="${1:-help}"
+shift || true
+
+# Remove --release from remaining args
+for arg in "$@"; do
+    if [[ "$arg" != "--release" ]]; then
+        EXTRA_ARGS+=("$arg")
+    fi
+done
+
+case "$cmd" in
+    ci)
+        echo "=== cargo fmt ==="
+        cargo fmt --check
+        echo "=== cargo clippy ==="
+        cargo clippy --all-targets -- -D warnings
+        echo "=== cargo test ==="
+        cargo test
+        echo "=== CI passed ==="
+        ;;
+    build)
+        cargo build $RELEASE "${EXTRA_ARGS[@]}"
+        ;;
+    test)
+        cargo test $RELEASE "${EXTRA_ARGS[@]}"
+        ;;
+    clippy)
+        cargo clippy --all-targets -- -D warnings
+        ;;
+    fmt)
+        cargo fmt
+        ;;
+    server)
+        cargo run $RELEASE -p minegraph-server -- "${EXTRA_ARGS[@]}"
+        ;;
+    worker)
+        cargo run $RELEASE -p minegraph-worker -- "${EXTRA_ARGS[@]}"
+        ;;
+    cli)
+        cargo run $RELEASE -p minegraph-cli -- "${EXTRA_ARGS[@]}"
+        ;;
+    web-dev)
+        cd web && npm run dev
+        ;;
+    web-build)
+        cd web && npm run build
+        ;;
+    web-check)
+        cd web && npm run check
+        ;;
+    fleet)
+        ./scripts/fleet.sh "${EXTRA_ARGS[@]}" $RELEASE
+        ;;
+    stop-fleet)
+        echo "Killing all minegraph-worker processes..."
+        pkill -f "minegraph-worker" 2>/dev/null || true
+        sleep 1
+        if pgrep -f "minegraph-worker" > /dev/null 2>&1; then
+            echo "Force killing remaining..."
+            pkill -9 -f "minegraph-worker" 2>/dev/null || true
+        fi
+        echo "Done."
+        ;;
+    migrate)
+        cargo run -p minegraph-server -- --migrate
+        ;;
+    help|*)
+        cat <<EOF
+MineGraph v1 task runner
+
+Usage: ./run <command> [--release] [args...]
+
+Commands:
+  ci          Full CI: fmt + clippy + test
+  build       Build all crates
+  test        Run tests
+  clippy      Run clippy
+  fmt         Format code
+  server      Start API server
+  worker      Start search worker
+  cli         Run minegraph CLI
+  web-dev     SvelteKit dev server on :5173
+  web-build   Build web app for production
+  fleet       Launch worker fleet (--workers N --n N)
+  stop-fleet  Kill all running workers
+  migrate     Run database migrations
+  help        Show this help
+
+Add --release for optimized builds.
+EOF
+        ;;
+esac

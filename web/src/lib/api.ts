@@ -1,249 +1,176 @@
+// MineGraph v1 API client
+
 const BASE = '/api';
 
-// ── Types ────────────────────────────────────────────────────────────
+async function get<T>(path: string): Promise<T> {
+	const res = await fetch(`${BASE}${path}`);
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({ error: res.statusText }));
+		throw new Error(body.error || res.statusText);
+	}
+	return res.json();
+}
+
+// ── Types ───────────────────────────────────────────────────
 
 export interface HealthResponse {
 	name: string;
 	version: string;
 	status: string;
-}
-
-export interface RgxfJson {
-	n: number;
-	encoding: string;
-	bits_b64: string;
-}
-
-export interface VerifyRequest {
-	oras_version: string;
-	k: number;
-	ell: number;
-	graph: RgxfJson;
-	want_cid: boolean;
-}
-
-export interface VerifyResponse {
-	status: 'accepted' | 'rejected';
-	graph_cid?: string;
-	reason?: string;
-	witness?: number[];
+	db: string;
+	server_key_id: string;
 }
 
 export interface LeaderboardSummary {
-	k: number;
-	ell: number;
 	n: number;
 	entry_count: number;
-	top_cid: string | null;
-	last_updated: string | null;
 }
 
 export interface LeaderboardEntry {
-	k: number;
-	ell: number;
-	n: number;
-	graph_cid: string;
 	rank: number;
-	tier1_max: number;
-	tier1_min: number;
-	goodman_gap: number;
-	tier2_aut: number;
-	score_json: string;
-	key_id: string | null;
-	metadata: string | null;
+	cid: string;
+	key_id: string;
+	graph6?: string;
+	goodman_gap?: number;
+	aut_order?: number;
+	histogram?: { tiers: { k: number; red: number; blue: number }[] };
 	admitted_at: string;
 }
 
 export interface LeaderboardDetail {
-	k: number;
-	ell: number;
 	n: number;
 	total: number;
-	offset: number;
-	limit: number;
 	entries: LeaderboardEntry[];
-	top_graph: RgxfJson | null;
+	top_graph?: { cid: string; graph6: string; rank: number };
+}
+
+export interface LeaderboardGraph {
+	rank: number;
+	cid: string;
+	graph6: string;
 }
 
 export interface ThresholdInfo {
-	entry_count: number;
-	capacity: number;
-	worst_tier1_max: number | null;
-	worst_tier1_min: number | null;
-	worst_goodman_gap: number | null;
-	worst_tier2_aut: number | null;
-	worst_tier3_cid: string | null;
-}
-
-export interface SubmitRequest {
-	k: number;
-	ell: number;
 	n: number;
-	graph: RgxfJson;
-}
-
-export interface SubmitResponse {
-	graph_cid: string;
-	verdict: 'accepted' | 'rejected';
-	reason?: string;
-	witness?: number[];
-	admitted: boolean;
-	rank: number | null;
-	score: Record<string, unknown> | null;
+	count: number;
+	capacity: number;
+	threshold_score_bytes: string | null;
 }
 
 export interface SubmissionDetail {
-	graph_cid: string;
-	k: number;
-	ell: number;
-	n: number;
-	rgxf: RgxfJson | null;
-	submitted_at: string;
-	verdict: string | null;
-	reason: string | null;
-	witness: number[] | null;
-	verified_at: string | null;
-	leaderboard_rank: number | null;
-	score: Record<string, unknown> | null;
-	key_id: string | null;
-	sig_status: string;
-	metadata: Record<string, unknown> | null;
+	submission: { cid: string; key_id: string; metadata: any; created_at: string };
+	graph: { n: number; graph6: string } | null;
+	score: { histogram: any; goodman_gap: number; aut_order: number } | null;
+	receipt: { server_key_id: string; verdict: string; signature: string; score: any } | null;
 }
 
-export interface KeyLeaderboardEntry {
-	k: number;
-	ell: number;
-	n: number;
-	graph_cid: string;
-	rank: number;
-	tier1_max: number;
-	tier1_min: number;
-	goodman_gap: number;
-	tier2_aut: number;
-	admitted_at: string;
+export interface ServerEvent {
+	type: 'admission' | 'submission' | 'worker_heartbeat';
+	n?: number;
+	cid?: string;
+	key_id?: string;
+	rank?: number;
+	worker_id?: string;
+	stats?: WorkerStats;
 }
 
-export interface KeyInfo {
+export interface WorkerInfo {
+	worker_id: string;
+	key_id: string;
+	strategy: string;
+	n: number;
+	stats: WorkerStats;
+	last_seen: string;
+	stale: boolean;
+}
+
+export interface WorkerStats {
+	round: number;
+	total_discoveries: number;
+	total_submitted: number;
+	total_admitted: number;
+	buffered: number;
+	last_round_ms: number;
+	new_unique_last_round: number;
+	uptime_secs: number;
+	current_graph6?: string;
+	violation_score?: number;
+	goodman_gap?: number;
+	aut_order?: number;
+}
+
+// ── API functions ───────────────────────────────────────────
+
+export interface HistorySnapshot {
+	t: string;
+	count: number;
+	total_score: number;
+	best_gap: number | null;
+	worst_gap: number | null;
+	median_gap: number | null;
+	avg_gap: number | null;
+	best_aut: number | null;
+	avg_aut: number | null;
+}
+
+export interface IdentityDetail {
 	key_id: string;
 	public_key: string;
 	display_name: string | null;
 	github_repo: string | null;
 	created_at: string;
-	leaderboard_entries: KeyLeaderboardEntry[];
 }
-
-// ── API Functions ────────────────────────────────────────────────────
 
 export async function getHealth(): Promise<HealthResponse> {
-	const res = await fetch(`${BASE}/health`);
-	return res.json();
+	return get('/health');
 }
 
-export async function getLeaderboards(): Promise<LeaderboardSummary[]> {
-	const res = await fetch(`${BASE}/leaderboards`);
-	const data = await res.json();
-	return data.leaderboards;
+export async function getWorkers(): Promise<{ workers: WorkerInfo[] }> {
+	return get('/workers');
 }
 
-export async function getNValuesForPair(
-	k: number,
-	ell: number
-): Promise<{ k: number; ell: number; n_values: number[] }> {
-	const res = await fetch(`${BASE}/leaderboards/${k}/${ell}`);
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || `HTTP ${res.status}`);
-	}
-	return res.json();
+export async function getHistory(n: number, since?: string): Promise<{ snapshots: HistorySnapshot[] }> {
+	const params = since ? `?since=${encodeURIComponent(since)}` : '';
+	return get(`/leaderboards/${n}/history${params}`);
 }
 
-export async function getLeaderboard(
-	k: number,
-	ell: number,
-	n: number,
-	offset: number = 0,
-	limit: number = 50
-): Promise<LeaderboardDetail> {
-	const res = await fetch(
-		`${BASE}/leaderboards/${k}/${ell}/${n}?offset=${offset}&limit=${limit}`
-	);
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || `HTTP ${res.status}`);
-	}
-	return res.json();
+export async function getIdentity(keyId: string): Promise<IdentityDetail> {
+	return get(`/keys/${keyId}`);
 }
 
-export async function getLeaderboardGraphs(
-	k: number,
-	ell: number,
-	n: number,
-	limit: number = 50,
-	offset: number = 0
-): Promise<RgxfJson[]> {
-	const res = await fetch(
-		`${BASE}/leaderboards/${k}/${ell}/${n}/graphs?limit=${limit}&offset=${offset}`
-	);
-	if (!res.ok) {
-		return []; // graceful fallback — thumbnails just won't render
-	}
-	const data = await res.json();
-	return data.graphs;
+export async function getIdentitySubmissions(keyId: string, limit = 50): Promise<{ submissions: any[] }> {
+	return get(`/keys/${keyId}/submissions?limit=${limit}`);
 }
 
-export async function getThreshold(
-	k: number,
-	ell: number,
-	n: number
-): Promise<ThresholdInfo> {
-	const res = await fetch(`${BASE}/leaderboards/${k}/${ell}/${n}/threshold`);
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || `HTTP ${res.status}`);
-	}
-	return res.json();
+export async function getLeaderboards(): Promise<{ leaderboards: LeaderboardSummary[] }> {
+	return get('/leaderboards');
 }
 
-export async function submitVerify(req: VerifyRequest): Promise<VerifyResponse> {
-	const res = await fetch(`${BASE}/verify`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(req)
-	});
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || `HTTP ${res.status}`);
-	}
-	return res.json();
+export async function getLeaderboard(n: number, limit = 50, offset = 0): Promise<LeaderboardDetail> {
+	return get(`/leaderboards/${n}?limit=${limit}&offset=${offset}`);
 }
 
-export async function submitGraph(req: SubmitRequest): Promise<SubmitResponse> {
-	const res = await fetch(`${BASE}/submit`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(req)
-	});
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || `HTTP ${res.status}`);
-	}
-	return res.json();
+export async function getLeaderboardGraphs(n: number, limit = 50, offset = 0): Promise<{ graphs: LeaderboardGraph[] }> {
+	return get(`/leaderboards/${n}/graphs?limit=${limit}&offset=${offset}`);
+}
+
+export async function getThreshold(n: number): Promise<ThresholdInfo> {
+	return get(`/leaderboards/${n}/threshold`);
 }
 
 export async function getSubmission(cid: string): Promise<SubmissionDetail> {
-	const res = await fetch(`${BASE}/submissions/${encodeURIComponent(cid)}`);
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || `HTTP ${res.status}`);
-	}
-	return res.json();
+	return get(`/submissions/${cid}`);
 }
 
-export async function getKeyInfo(keyId: string): Promise<KeyInfo> {
-	const res = await fetch(`${BASE}/keys/${encodeURIComponent(keyId)}`);
-	if (!res.ok) {
-		const err = await res.json();
-		throw new Error(err.error || `HTTP ${res.status}`);
-	}
-	return res.json();
+// ── SSE ─────────────────────────────────────────────────────
+
+export function subscribeEvents(onEvent: (event: ServerEvent) => void): () => void {
+	const source = new EventSource(`${BASE}/events`);
+	source.onmessage = (e) => {
+		try {
+			const event: ServerEvent = JSON.parse(e.data);
+			onEvent(event);
+		} catch { /* ignore parse errors */ }
+	};
+	return () => source.close();
 }

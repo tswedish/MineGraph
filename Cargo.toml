@@ -1,35 +1,66 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/ramseynet-types",
-    "crates/ramseynet-graph",
-    "crates/ramseynet-verifier",
-    "crates/ramseynet-ledger",
-    "crates/ramseynet-server",
-    "crates/ramseynet-worker-api",
-    "crates/ramseynet-worker-core",
-    "crates/ramseynet-strategies",
-    "crates/ramseynet-worker",
+    "crates/minegraph-types",
+    "crates/minegraph-graph",
+    "crates/minegraph-scoring",
+    "crates/minegraph-identity",
+    "crates/minegraph-store",
+    "crates/minegraph-server",
+    "crates/minegraph-worker-api",
+    "crates/minegraph-worker-core",
+    "crates/minegraph-strategies",
+    "crates/minegraph-worker",
     "crates/minegraph-cli",
 ]
 
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/anomalyco/minegraph"
+
 [workspace.dependencies]
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
-base64 = "0.22"
-thiserror = "2"
-anyhow = "1"
-tokio = { version = "1", features = ["full"] }
-axum = { version = "0.8", features = ["ws"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
-ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
+
+# Hashing & crypto
+blake3 = "1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = { version = "0.8", features = ["small_rng"] }
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "serde"] }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+axum = { version = "0.8", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+reqwest = { version = "0.12", features = ["json"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "json", "migrate"] }
+
+# Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4", features = ["derive"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Hex encoding
 hex = "0.4"
-criterion = { version = "0.5", features = ["html_reports"] }
+
+# TOML config
+toml = "0.8"
+
+# Testing
+proptest = "1"

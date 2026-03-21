@@ -1,225 +1,211 @@
-# MineGraph
+# MineGraph v1
 
-Distributed Ramsey graph search, competitive leaderboards, and deterministic generative graph art ("MineGraph Gems").
+Combinatorial graph search game with competitive leaderboards and deterministic
+generative graph art. Players run search workers that discover high-scoring
+graphs and submit them to a central leaderboard server, competing for rank.
 
-## What is this?
+## Prerequisites
 
-MineGraph searches for [Ramsey graphs](https://en.wikipedia.org/wiki/Ramsey%27s_theorem) — graphs that avoid monochromatic cliques and independent sets. The flagship target is R(5,5) on n=25 vertices, where 43 ≤ R(5,5) ≤ 48 is an open problem in combinatorics.
+- **Rust** (stable, via [rustup](https://rustup.rs/))
+- **PostgreSQL** 14+ (local or remote)
 
-Workers search for candidate graphs, submit them to a central server for verification and scoring, and compete on leaderboards. Interesting graphs become visual artifacts — deterministic pixel-art "MineGraph Gems."
+## Setup
 
-## Quick Start
+### 1. Database
 
-### Prerequisites
-
-- [Rust](https://rustup.rs/) (stable)
-- [Node.js](https://nodejs.org/) 20+ with [pnpm](https://pnpm.io/)
-
-### Install the CLI
+If you have a local PostgreSQL instance running (e.g., system Postgres on port 5432):
 
 ```bash
-cargo install --path crates/minegraph-cli
+sudo -u postgres createuser minegraph
+sudo -u postgres createdb -O minegraph minegraph
+sudo -u postgres psql -c "ALTER USER minegraph WITH PASSWORD 'minegraph';"
 ```
 
-This installs the `minegraph` binary for identity management and configuration.
-
-### Build & Run
+Or with Docker (uses port 5433 to avoid conflict with local Postgres):
 
 ```bash
-# Full CI: clippy + tests + web build
-./run ci
-
-# Start the API server
-./run server --release
-
-# In another terminal — start a search fleet
-./run fleet --workers 16 --base-port 9000
-
-# Or a single worker
-./run search --release --k 5 --ell 5 --n 25 --port 8080
+docker-compose up -d
+# DATABASE_URL becomes: postgres://minegraph:minegraph@localhost:5433/minegraph
 ```
 
-The server runs on `http://localhost:3001`. Worker dashboards on `http://localhost:9000` through `http://localhost:9015`.
+### 2. Environment
 
-### Set Up Identity (optional but recommended)
+Copy the example env file and edit if needed:
 
 ```bash
-# Initialize project-local config
-minegraph init
-
-# Generate a signing keypair
-minegraph keygen --name "my-desktop"
-
-# Register your key with the server
-minegraph register-key --server http://localhost:3001
-
-# Verify your identity
-minegraph whoami
+cp .env.example .env
 ```
 
-Once configured, workers auto-detect the signing key and sign all submissions.
-The leaderboard shows your key_id next to your discoveries.
-
-### All Commands
+The defaults work with the local database created above:
 
 ```
-./run ci          # Full CI: clippy + tests + web build
+DATABASE_URL=postgres://minegraph:minegraph@localhost/minegraph
+PORT=3001
+```
+
+### 3. Start the server
+
+First run (creates tables):
+
+```bash
+cargo run -p minegraph-server -- --migrate
+```
+
+Subsequent runs (database already exists):
+
+```bash
+cargo run -p minegraph-server
+```
+
+The server reads `DATABASE_URL` and `PORT` from the environment (or `.env`).
+You can also pass them explicitly:
+
+```bash
+cargo run -p minegraph-server -- \
+  --database-url 'postgres://minegraph:minegraph@localhost/minegraph'
+```
+
+The `--migrate` flag is idempotent — safe to always include, but not required
+after the first run.
+
+Control log verbosity with `RUST_LOG` (default is `info`):
+
+```bash
+RUST_LOG=debug cargo run -p minegraph-server                          # verbose
+RUST_LOG=warn cargo run -p minegraph-server                           # quiet
+RUST_LOG=info,minegraph_server=debug cargo run -p minegraph-server    # server detail only
+```
+
+By default, the server generates an **ephemeral** signing identity on each
+startup (a new key_id every time). For production or persistent testing, create
+a dedicated server key:
+
+```bash
+# Generate a server key (saved to a specific file)
+cargo run -p minegraph-cli -- keygen --name "my-server" \
+  --output .config/minegraph/server-key.json
+
+# Start the server with the persistent key
+cargo run -p minegraph-server -- --server-key .config/minegraph/server-key.json
+```
+
+The server uses this key to sign verification receipts. A persistent key means
+receipts remain verifiable across server restarts.
+
+You can also set this via environment:
+
+```bash
+export SERVER_KEY_PATH=.config/minegraph/server-key.json
+cargo run -p minegraph-server
+```
+
+### 4. Generate a worker identity
+
+```bash
+cargo run -p minegraph-cli -- keygen --name "my-worker"
+cargo run -p minegraph-cli -- register-key --server http://localhost:3001
+```
+
+### 5. Score and submit graphs
+
+```bash
+# Score a graph locally (no server needed)
+cargo run -p minegraph-cli -- score --n 5 --graph6 'Dhc'
+
+# Submit to the server
+cargo run -p minegraph-cli -- submit --n 5 --graph6 'Dhc' \
+  --server http://localhost:3001
+
+# Check the leaderboard
+cargo run -p minegraph-cli -- leaderboard --n 5 --server http://localhost:3001
+
+# Server health
+cargo run -p minegraph-cli -- health --server http://localhost:3001
+```
+
+## Development
+
+```bash
+./run ci          # Full CI: fmt + clippy + tests
 ./run test        # Rust tests only
 ./run clippy      # Lint
-./run build       # Build all crates
-./run web         # Production web build
-./run web-dev     # Web dev server (:5173)
-./run server      # API server (:3001)
-./run server-log  # API server with file logging
-./run search      # Search worker (default: tree2, idle mode)
-./run fleet       # Launch 16-worker fleet (production search)
-./run fleet --sweep  # Fleet with hyperparameter sweep
-./run experiment  # Head-to-head strategy comparison
-./run bench       # Criterion benchmarks (verifier/scoring)
-./run seed        # Seed test data
+./run fmt         # Format code
+./run server      # Start API server (needs DATABASE_URL env or --database-url)
 ```
 
-Add `--release` to `server`, `search`, `fleet`, `build`, `test` for optimized builds.
+## Architecture
 
-### Search Worker
-
-```bash
-./run search --k 5 --ell 5 --n 25                       # tree2 (default), default server
-./run search --k 5 --ell 5 --n 25 --strategy tree       # original beam search
-./run search --k 5 --ell 5 --n 25 --strategy evo        # evolutionary SA
-./run search --k 3 --ell 4 --n 8 --server http://remote:3001 --max-iters 50000
-./run search --k 4 --ell 4 --n 17 --offline --port 8080
-```
-
-Options: `--strategy {tree|tree2|evo|all}`, `--init {perturbed-paley|paley|random|leaderboard}`, `--noise-flips N`, `--max-iters N`, `--beam-width N`, `--max-depth N`, `--port PORT`, `--offline`, `--no-backoff`, `--sample-bias F`, `--leaderboard-sample-size N`, `--collector-capacity N`, `--max-known-cids N`, `--commit-hash HASH`.
-
-## Identity & Signing
-
-Ed25519 signing for submission attribution. Project-local config at `.config/minegraph/`.
-
-```bash
-minegraph init                                     # create config directory
-minegraph keygen --name "my-desktop"               # generate signing keypair
-minegraph whoami                                   # show current identity
-minegraph register-key --server http://localhost:3001  # register with server
-minegraph config show                              # view all settings
-```
-
-Workers auto-detect the signing key from `.config/minegraph/key.json` and sign
-submissions. The `--commit-hash` flag attaches a git commit for provenance.
-
-```bash
-./run search --release --k 5 --ell 5 --n 25 --commit-hash $(git rev-parse --short HEAD)
-```
-
-Server verifies signatures against registered keys. Sig status: `verified`,
-`unregistered` (key not registered), `invalid` (bad signature), `anonymous`
-(no key provided). Web app shows key_id or "anon" on leaderboard entries.
-
-## Experiment Loop
-
-The development cycle for improving search strategies:
-
-1. **Identify** the next algorithmic change (see `docs/LITERATURE_AND_IDEAS.md`)
-2. **Implement** the change as a new strategy or tree2 variant
-3. **Run** `./run fleet --sweep` or `./run experiment` against the production server
-4. **Analyze** with `./scripts/analyze_experiment.sh logs/fleet-*/`
-5. **Log** results in `experiments/ENNN.md`
-6. **Decide** — promote the winner, identify next change, repeat
-
-### Fleet Commands
-
-```bash
-# Production fleet (16 workers, best known config)
-./run fleet --workers 16 --base-port 9000 \
-  --beam-width 80 --max-depth 12 --sample-bias 0.8
-
-# Hyperparameter sweep (6 profiles, auto-distributed)
-./run fleet --sweep --base-port 9000
-
-# Check progress without stopping
-cat logs/fleet-*/status.txt
-
-# Full analysis after stopping
-./scripts/analyze_experiment.sh logs/fleet-*/
-```
-
-## Project Structure
+Rust workspace with 11 crates. The server is a pure REST API; web UIs are
+separate applications.
 
 ```
-crates/
-  ramseynet-types/        Shared protocol types (GraphCid, RamseyParams, Verdict)
-  ramseynet-graph/        RGXF graph encoding, neighbor bitmasks, SHA-256 CID
-  ramseynet-verifier/     Ramsey verifier (clique detection, 4-tier scoring, automorphism)
-  ramseynet-ledger/       SQLite ledger (submissions, leaderboards, identities)
-  ramseynet-server/       Axum HTTP server
-  ramseynet-worker-api/   Search strategy trait + job/result schemas
-  ramseynet-worker-core/  Worker engine: leaderboard sync, submission, init
-  ramseynet-strategies/   Search strategy implementations (tree, tree2, evolutionary SA)
-  ramseynet-worker/       CLI binary + worker web-app (visualization dashboard)
-  minegraph-cli/          MineGraph CLI: identity, config, key registration
-web/                      SvelteKit 2 / Svelte 5 frontend
-scripts/                  Fleet, experiment, analysis, gem rendering scripts
-experiments/              Experiment logs (E001–E004)
-docs/                     Design docs, literature review, strategy roadmap
-test-vectors/             Shared test data
+minegraph-types          Core newtypes: GraphCid, KeyId, Verdict
+minegraph-graph          AdjacencyMatrix, graph6 encode/decode, blake3 CID
+minegraph-scoring        Clique histogram, Goodman gap, GraphScore
+minegraph-identity       Ed25519 signing (shared by server, worker, CLI)
+minegraph-store          PostgreSQL data layer (sqlx)
+minegraph-server         Axum REST API + SSE events
+minegraph-worker-api     SearchStrategy trait, job/result types
+minegraph-worker-core    Worker engine (TODO)
+minegraph-strategies     Search strategies: tree2, evo (TODO)
+minegraph-worker         Worker CLI binary (TODO)
+minegraph-cli            CLI tool: keygen, register, submit, score, query
 ```
 
-## Leaderboard System
+### Crate dependency order
 
-Every valid (K,L,n) triple defines a leaderboard of configurable capacity (default 500, production uses 2000). Submit directly with `{k, ell, n, graph}`.
+`types` -> `graph` -> `scoring` -> `identity` -> `store` -> `server`
 
-**Scoring** (4-tier lexicographic, lower is better):
-- **T1**: `(max(C_omega, C_alpha), min(C_omega, C_alpha))` — clique counts
-- **T2**: Goodman gap — distance from theoretical minimum triangles
-- **T3**: `|Aut(G)|` — automorphism group order (highest wins)
-- **T4**: CID — deterministic tiebreaker
+`types` -> `graph` -> `worker-api` -> `{strategies, worker-core}` -> `worker`
 
-## Web Application
+### Key design choices
 
-SvelteKit frontend with:
-- **Homepage** — #1 gem showcase, server health badge
-- **Leaderboards** — browse by (K,L) pairs, drill into ranked tables with submitter identity
-- **Graph Visualization** — GemView (diamond matrix with hash-derived palette), MatrixView (adjacency matrix), CircleLayout (circle graph)
-- **Submit** — paste RGXF JSON, live preview, submit for verification
+| Area | Choice |
+|------|--------|
+| Graph format | graph6 (standard) |
+| Hashing | blake3 |
+| Database | PostgreSQL via sqlx |
+| Signatures | Required (Ed25519, no anonymous) |
+| Scoring | Full k-clique histogram, lexicographic |
+| Real-time | Server-Sent Events (SSE) |
+| Web UI | Separate SvelteKit apps (not built yet) |
 
-## Server API
+## API
 
-Port 3001, prefix `/api/`. SQLite at `./ramseynet.db`.
+Port 3001, prefix `/api/`.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/leaderboards` | GET | List all (K,L,n) leaderboards with summary |
-| `/api/leaderboards/{k}/{l}` | GET | List n values for a (K,L) pair |
-| `/api/leaderboards/{k}/{l}/{n}` | GET | Paginated leaderboard (`?offset=0&limit=50`) + top graph |
-| `/api/leaderboards/{k}/{l}/{n}/threshold` | GET | Admission threshold (score-to-beat) |
-| `/api/leaderboards/{k}/{l}/{n}/graphs` | GET | RGXF for leaderboard entries (`?limit=N&offset=N`) |
-| `/api/leaderboards/{k}/{l}/{n}/cids` | GET | Incremental CID sync (`?since=<ISO8601>`) |
-| `/api/submissions/{cid}` | GET | Submission detail: graph, receipt, rank |
-| `/api/verify` | POST | Stateless graph verification |
-| `/api/submit` | POST | Full lifecycle: verify + store + leaderboard admit |
-| `/api/keys` | POST | Register a public key with display_name and github_repo |
-| `/api/keys/{key_id}` | GET | Look up identity info |
+| `/api/health` | GET | Health check + server identity |
+| `/api/submit` | POST | Submit graph (requires signature) |
+| `/api/verify` | POST | Stateless scoring (no DB write) |
+| `/api/leaderboards` | GET | List all leaderboards by n |
+| `/api/leaderboards/{n}` | GET | Paginated leaderboard |
+| `/api/leaderboards/{n}/threshold` | GET | Admission score threshold |
+| `/api/leaderboards/{n}/cids` | GET | Incremental CID sync |
+| `/api/leaderboards/{n}/graphs` | GET | Batch graph6 download |
+| `/api/submissions/{cid}` | GET | Submission detail + receipt |
+| `/api/keys` | POST | Register public key |
+| `/api/keys/{key_id}` | GET | Identity info |
+| `/api/keys/{key_id}/submissions` | GET | Submissions by identity |
+| `/api/events` | GET | SSE stream of leaderboard events |
 
-## Key Specs
+## Scoring System
 
-- **RGXF**: Packed upper-triangular adjacency bitstring, SHA-256 content addressed
-- **OVWC-1**: Verifier contract — JSON stdin/stdout, exit 0
-- **Gem rendering**: `minegraph_gem_v3.py` (Python) and `GemView.svelte` (web component)
+Golf-style ranking (lower is better). For a graph G on n vertices:
 
-## Phase Status
+1. **k-clique histogram**: for each k from max_k down to 3,
+   compare `(max(red_k, blue_k), min(red_k, blue_k))` where red = cliques in G,
+   blue = cliques in complement(G)
+2. **Goodman gap**: actual monochromatic triangles minus theoretical minimum
+3. **Automorphism**: `1/|Aut(G)|` (more symmetric = better)
+4. **CID**: blake3 hash tiebreaker (lower wins)
 
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 0 — Scaffolding | Complete | Workspace, SvelteKit skeleton, CI |
-| 1 — Graph Library | Complete | RGXF, AdjacencyMatrix, CID |
-| 2 — Verifier | Complete | Clique detection, OVWC-1 |
-| 3 — Server + Ledger | Complete | Axum API, SQLite |
-| 4 — Web Application | Complete | Full interactive frontend with GemView |
-| 5 — Search Worker | Complete | Tree/beam search, evolutionary SA |
-| 5.5 — Leaderboard | Complete | 4-tier scoring, fleet infrastructure, experiment loop |
-| 6 — Identity | Complete | Ed25519 signing, key registration, signature verification |
+## Status
+
+The server, CLI, store, and scoring system are fully implemented. The search
+worker (strategies + engine loop) is the next major piece to port from the
+RamseyNet prototype.
 
 ## License
 

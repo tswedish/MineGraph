@@ -1,25 +1,23 @@
 [package]
 name = "minegraph-cli"
-version = "0.1.0"
-edition = "2021"
-description = "MineGraph CLI — key management, config, and experiment orchestration"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "minegraph"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = { workspace = true }
+minegraph-types = { path = "../minegraph-types" }
+minegraph-graph = { path = "../minegraph-graph" }
+minegraph-scoring = { path = "../minegraph-scoring" }
+minegraph-identity = { path = "../minegraph-identity" }
 clap = { workspace = true }
-ed25519-dalek = { workspace = true }
-hex = { workspace = true }
-rand = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
-toml = "0.8"
-reqwest = { version = "0.12", features = ["json", "blocking"] }
-
-[dev-dependencies]
-tempfile = "3"
+anyhow = { workspace = true }
+toml = { workspace = true }
+hex = { workspace = true }

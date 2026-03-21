@@ -1,194 +1,292 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
+use minegraph_identity::{Identity, canonical_payload};
+use std::path::PathBuf;
 
-#[allow(dead_code)]
-mod config;
-#[allow(dead_code)]
-mod identity;
+const DEFAULT_CONFIG_DIR: &str = ".config/minegraph";
+const KEY_FILE: &str = "key.json";
 
 #[derive(Parser)]
-#[command(
-    name = "minegraph",
-    about = "MineGraph CLI — graph search, identity, and experiments"
-)]
+#[command(name = "minegraph", about = "MineGraph CLI tool")]
 struct Cli {
-    /// Path to project config directory (default: .config/minegraph/ in cwd)
-    #[arg(long, global = true)]
-    config_dir: Option<String>,
-
     #[command(subcommand)]
-    command: Command,
+    command: Commands,
 }
 
 #[derive(Subcommand)]
-enum Command {
-    /// Generate a new Ed25519 signing keypair
-    Keygen {
-        /// Display name for this key (optional)
-        #[arg(long)]
-        name: Option<String>,
-    },
-    /// Show current identity (key_id and display name)
-    Whoami,
-    /// Show or edit config
-    Config {
-        #[command(subcommand)]
-        action: ConfigAction,
-    },
-    /// Initialize a MineGraph config directory in the current project
+enum Commands {
+    /// Create the config directory.
     Init,
-    /// Register your public key with a MineGraph server
-    RegisterKey {
-        /// Server URL (uses config server_url if not specified)
-        #[arg(long)]
-        server: Option<String>,
-        /// Display name (uses key file display_name if not specified)
+
+    /// Generate a new Ed25519 signing keypair.
+    Keygen {
+        /// Display name for this identity.
         #[arg(long)]
         name: Option<String>,
-        /// GitHub repo (e.g., "user/repo")
+
+        /// Output path for the key file. Defaults to .config/minegraph/key.json.
+        #[arg(long, short)]
+        output: Option<String>,
+    },
+
+    /// Show current identity.
+    Whoami,
+
+    /// Register public key with a server.
+    RegisterKey {
+        /// Server URL.
+        #[arg(long, default_value = "http://localhost:3001")]
+        server: String,
+
+        /// GitHub repo link.
         #[arg(long)]
         github_repo: Option<String>,
     },
+
+    /// Score a graph locally (no server needed).
+    Score {
+        /// Vertex count.
+        #[arg(long)]
+        n: u32,
+        /// graph6 encoding.
+        #[arg(long)]
+        graph6: String,
+        /// Max k for histogram.
+        #[arg(long, default_value = "5")]
+        max_k: u32,
+    },
+
+    /// Submit a graph to a server.
+    Submit {
+        /// Server URL.
+        #[arg(long, default_value = "http://localhost:3001")]
+        server: String,
+        /// Vertex count.
+        #[arg(long)]
+        n: u32,
+        /// graph6 encoding.
+        #[arg(long)]
+        graph6: String,
+    },
+
+    /// Query a leaderboard.
+    Leaderboard {
+        /// Server URL.
+        #[arg(long, default_value = "http://localhost:3001")]
+        server: String,
+        /// Vertex count.
+        #[arg(long)]
+        n: u32,
+        /// Maximum entries to show.
+        #[arg(long, default_value = "20")]
+        limit: u32,
+    },
+
+    /// Check server health.
+    Health {
+        /// Server URL.
+        #[arg(long, default_value = "http://localhost:3001")]
+        server: String,
+    },
 }
 
-#[derive(Subcommand)]
-enum ConfigAction {
-    /// Show current config
-    Show,
-    /// Set a config value
-    Set {
-        /// Key (e.g., server_url, strategy, beam_width)
-        key: String,
-        /// Value
-        value: String,
-    },
-    /// Get a config value
-    Get {
-        /// Key
-        key: String,
-    },
+fn config_dir() -> PathBuf {
+    PathBuf::from(DEFAULT_CONFIG_DIR)
 }
 
-fn main() -> Result<()> {
+fn key_path() -> PathBuf {
+    config_dir().join(KEY_FILE)
+}
+
+fn load_identity() -> Result<Identity> {
+    let path = key_path();
+    if !path.exists() {
+        anyhow::bail!(
+            "No key found at {}. Run `minegraph keygen` first.",
+            path.display()
+        );
+    }
+    Ok(Identity::load(&path)?)
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let config_dir = config::resolve_config_dir(cli.config_dir.as_deref());
-
     match cli.command {
-        Command::Init => {
-            config::init_config_dir(&config_dir)?;
-            println!("Initialized MineGraph config at {}", config_dir.display());
-            println!("\nRun `minegraph keygen` to create a signing key.");
+        Commands::Init => {
+            let dir = config_dir();
+            std::fs::create_dir_all(&dir)?;
+            println!("Created config directory: {}", dir.display());
         }
 
-        Command::Keygen { name } => {
-            config::ensure_config_dir(&config_dir)?;
-            let key_path = config_dir.join("key.json");
-            if key_path.exists() {
-                eprintln!("Key already exists at {}", key_path.display());
-                eprintln!("To generate a new key, remove it first.");
-                std::process::exit(1);
+        Commands::Keygen { name, output } => {
+            let path = if let Some(ref out) = output {
+                let p = PathBuf::from(out);
+                if let Some(parent) = p.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                p
+            } else {
+                let dir = config_dir();
+                std::fs::create_dir_all(&dir)?;
+                key_path()
+            };
+            if path.exists() {
+                anyhow::bail!("Key already exists at {}. Delete it first.", path.display());
             }
-            let info = identity::generate_and_save(&key_path, name.as_deref())?;
-            println!("Generated new signing key:");
-            println!("  Key ID:  {}", info.key_id);
-            if let Some(ref n) = info.display_name {
-                println!("  Name:    {}", n);
+            let identity = Identity::generate(name);
+            identity.save(&path)?;
+            println!("Generated keypair:");
+            println!("  key_id: {}", identity.key_id);
+            if let Some(name) = &identity.display_name {
+                println!("  name:   {name}");
             }
-            println!("  Saved:   {}", key_path.display());
-            println!("\nYour public key (share this):");
-            println!("  {}", info.public_key_hex);
+            println!("  saved:  {}", path.display());
         }
 
-        Command::Whoami => {
-            let key_path = config_dir.join("key.json");
-            if !key_path.exists() {
-                println!("No signing key found.");
-                println!("Run `minegraph keygen` to create one.");
-                std::process::exit(0);
+        Commands::Whoami => {
+            let identity = load_identity()?;
+            println!("key_id: {}", identity.key_id);
+            if let Some(name) = &identity.display_name {
+                println!("name:   {name}");
             }
-            let info = identity::load_key_info(&key_path)?;
-            println!("Key ID:     {}", info.key_id);
-            if let Some(ref n) = info.display_name {
-                println!("Name:       {}", n);
-            }
-            println!("Public key: {}", info.public_key_hex);
-            println!("Key file:   {}", key_path.display());
+            println!(
+                "pubkey: {}",
+                hex::encode(identity.verifying_key().as_bytes())
+            );
         }
 
-        Command::RegisterKey {
+        Commands::RegisterKey {
             server,
-            name,
             github_repo,
         } => {
-            let key_path = config_dir.join("key.json");
-            if !key_path.exists() {
-                eprintln!("No signing key found. Run `minegraph keygen` first.");
-                std::process::exit(1);
-            }
-            let info = identity::load_key_info(&key_path)?;
-            let config_path = config_dir.join("config.toml");
-            let cfg = config::load_config(&config_path)?;
-            let server_url = server.unwrap_or(cfg.server_url);
-            let display_name = name.or(info.display_name);
+            let identity = load_identity()?;
+            let pk_hex = hex::encode(identity.verifying_key().as_bytes());
 
-            let url = format!("{}/api/keys", server_url.trim_end_matches('/'));
-            let body = serde_json::json!({
-                "public_key": info.public_key_hex,
-                "display_name": display_name,
-                "github_repo": github_repo,
+            let mut body = serde_json::json!({
+                "public_key": pk_hex,
             });
+            if let Some(name) = &identity.display_name {
+                body["display_name"] = serde_json::json!(name);
+            }
+            if let Some(repo) = &github_repo {
+                body["github_repo"] = serde_json::json!(repo);
+            }
 
-            println!("Registering key {} with {}...", info.key_id, server_url);
-            let resp = reqwest::blocking::Client::new()
-                .post(&url)
+            let client = reqwest::Client::new();
+            let resp = client
+                .post(format!("{server}/api/keys"))
                 .json(&body)
                 .send()
-                .context("Failed to connect to server")?;
+                .await?;
 
             if resp.status().is_success() {
-                let data: serde_json::Value = resp.json()?;
-                println!("Registered!");
-                println!("  Key ID:       {}", data["key_id"]);
-                if let Some(n) = data["display_name"].as_str() {
-                    println!("  Display name: {}", n);
-                }
-                if let Some(r) = data["github_repo"].as_str() {
-                    println!("  GitHub repo:  {}", r);
+                let data: serde_json::Value = resp.json().await?;
+                println!("Registered with server:");
+                println!("  key_id: {}", data["key_id"]);
+                println!("  name:   {}", data["display_name"]);
+            } else {
+                let status = resp.status();
+                let text = resp.text().await?;
+                anyhow::bail!("Registration failed ({status}): {text}");
+            }
+        }
+
+        Commands::Score { n, graph6, max_k } => {
+            let matrix = minegraph_graph::graph6::decode(&graph6)?;
+            if matrix.n() != n {
+                anyhow::bail!("graph6 decodes to n={}, expected n={n}", matrix.n());
+            }
+
+            let histogram = minegraph_scoring::histogram::CliqueHistogram::compute(&matrix, max_k);
+            let (red_tri, blue_tri) = histogram.tier(3).map(|t| (t.red, t.blue)).unwrap_or((0, 0));
+            let gap = minegraph_scoring::goodman::goodman_gap(n, red_tri, blue_tri);
+            let cid = minegraph_graph::compute_cid(&matrix);
+
+            println!("Graph scoring (n={n}):");
+            println!("  CID:         {}", cid.to_hex());
+            println!("  Histogram:");
+            for tier in &histogram.tiers {
+                println!(
+                    "    k={}: red={}, blue={} -> ({}, {})",
+                    tier.k,
+                    tier.red,
+                    tier.blue,
+                    tier.red.max(tier.blue),
+                    tier.red.min(tier.blue)
+                );
+            }
+            println!("  Goodman gap: {gap}");
+            println!("  Edges:       {}", matrix.num_edges());
+        }
+
+        Commands::Submit { server, n, graph6 } => {
+            let identity = load_identity()?;
+            let payload = canonical_payload(n, &graph6);
+            let signature = identity.sign(&payload);
+
+            let body = serde_json::json!({
+                "n": n,
+                "graph6": graph6,
+                "key_id": identity.key_id.as_str(),
+                "signature": signature,
+            });
+
+            let client = reqwest::Client::new();
+            let resp = client
+                .post(format!("{server}/api/submit"))
+                .json(&body)
+                .send()
+                .await?;
+
+            if resp.status().is_success() {
+                let data: serde_json::Value = resp.json().await?;
+                println!("Submitted successfully:");
+                println!("  CID:      {}", data["cid"]);
+                println!("  Verdict:  {}", data["verdict"]);
+                println!("  Admitted: {}", data["admitted"]);
+                if let Some(rank) = data["rank"].as_i64() {
+                    println!("  Rank:     {rank}");
                 }
             } else {
                 let status = resp.status();
-                let body = resp.text().unwrap_or_default();
-                eprintln!("Registration failed: {} {}", status, body);
-                std::process::exit(1);
+                let text = resp.text().await?;
+                anyhow::bail!("Submission failed ({status}): {text}");
             }
         }
 
-        Command::Config { action } => {
-            config::ensure_config_dir(&config_dir)?;
-            let config_path = config_dir.join("config.toml");
-            match action {
-                ConfigAction::Show => {
-                    let cfg = config::load_config(&config_path)?;
-                    println!("{}", toml::to_string_pretty(&cfg)?);
-                }
-                ConfigAction::Set { key, value } => {
-                    let mut cfg = config::load_config(&config_path)?;
-                    config::set_value(&mut cfg, &key, &value)?;
-                    config::save_config(&config_path, &cfg)?;
-                    println!("{} = {}", key, value);
-                }
-                ConfigAction::Get { key } => {
-                    let cfg = config::load_config(&config_path)?;
-                    match config::get_value(&cfg, &key) {
-                        Some(v) => println!("{}", v),
-                        None => {
-                            eprintln!("Key '{}' not set", key);
-                            std::process::exit(1);
-                        }
+        Commands::Leaderboard { server, n, limit } => {
+            let client = reqwest::Client::new();
+            let resp = client
+                .get(format!("{server}/api/leaderboards/{n}?limit={limit}"))
+                .send()
+                .await?;
+
+            if resp.status().is_success() {
+                let data: serde_json::Value = resp.json().await?;
+                let total = data["total"].as_i64().unwrap_or(0);
+                println!("Leaderboard n={n} ({total} entries):");
+                if let Some(entries) = data["entries"].as_array() {
+                    for entry in entries {
+                        println!(
+                            "  #{}: {} (by {})",
+                            entry["rank"], entry["cid"], entry["key_id"]
+                        );
                     }
                 }
+            } else {
+                let status = resp.status();
+                let text = resp.text().await?;
+                anyhow::bail!("Query failed ({status}): {text}");
             }
+        }
+
+        Commands::Health { server } => {
+            let client = reqwest::Client::new();
+            let resp = client.get(format!("{server}/api/health")).send().await?;
+            let data: serde_json::Value = resp.json().await?;
+            println!("{}", serde_json::to_string_pretty(&data)?);
         }
     }
 
