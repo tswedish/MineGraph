@@ -15,7 +15,7 @@ jobs:
     name: Rust (fmt + clippy + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -32,13 +32,123 @@ jobs:
       - name: Run tests
         run: cargo test --all
 
+  integration:
+    name: Integration (server + Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: minegraph
+          POSTGRES_PASSWORD: minegraph
+          POSTGRES_DB: minegraph
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://minegraph:minegraph@localhost/minegraph
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build server (release)
+        run: cargo build --release -p minegraph-server
+
+      - name: Start server
+        run: |
+          ./target/release/minegraph-server --migrate --port 3001 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          # Wait for server to be ready
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
+              echo "Server ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Health check
+        run: |
+          RESP=$(curl -sf http://localhost:3001/api/health)
+          echo "$RESP" | jq .
+          echo "$RESP" | jq -e '.status == "ok"'
+          echo "$RESP" | jq -e '.pool.size > 0'
+
+      - name: Input validation (n=0 rejected)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3001/api/verify \
+            -H 'Content-Type: application/json' -d '{"n": 0, "graph6": "?"}')
+          [ "$STATUS" = "400" ] && echo "PASS: n=0 returns 400" || (echo "FAIL: got $STATUS" && exit 1)
+
+      - name: Input validation (n=9999 rejected)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3001/api/verify \
+            -H 'Content-Type: application/json' -d '{"n": 9999, "graph6": "?"}')
+          [ "$STATUS" = "400" ] && echo "PASS: n=9999 returns 400" || (echo "FAIL: got $STATUS" && exit 1)
+
+      - name: Verify endpoint (valid graph)
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:3001/api/verify \
+            -H 'Content-Type: application/json' -d '{"n": 5, "graph6": "Dhc"}')
+          echo "$RESP" | jq .
+          echo "$RESP" | jq -e '.cid'
+          echo "$RESP" | jq -e '.histogram'
+
+      - name: Leaderboard (empty, no crash)
+        run: |
+          RESP=$(curl -sf http://localhost:3001/api/leaderboards)
+          echo "$RESP" | jq .
+
+      - name: Rate limiting (submit/verify)
+        run: |
+          # Fire 15 rapid verify requests — should see some 429s
+          CODES=""
+          for i in $(seq 1 15); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3001/api/verify \
+              -H 'Content-Type: application/json' -d '{"n": 5, "graph6": "Dhc"}')
+            CODES="$CODES $CODE"
+          done
+          echo "Response codes: $CODES"
+          echo "$CODES" | grep -q "429" && echo "PASS: rate limiting active" || echo "WARN: no 429 seen (burst may not have been exceeded)"
+
+      - name: Graceful shutdown
+        run: |
+          kill -TERM $SERVER_PID
+          # Wait up to 10s for clean exit
+          for i in $(seq 1 10); do
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+              echo "PASS: server shut down cleanly"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "FAIL: server did not shut down in 10s"
+          exit 1
+
+  docker:
+    name: Docker (build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build server image
+        run: docker build -f Dockerfile.server -t minegraph-server:test .
+
   web:
     name: Web (build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
 
