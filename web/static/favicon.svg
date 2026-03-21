@@ -15,8 +15,8 @@
     <!-- Legs to arms: left leg to left arm, right leg to right arm -->
     <line x1="27.6" y1="19.3" x2="13.8" y2="61.7"/>
     <line x1="72.4" y1="19.3" x2="86.2" y2="61.7"/>
-    <!-- Arms connected (thicker for visibility at small sizes) -->
-    <line x1="13.8" y1="61.7" x2="86.2" y2="61.7" stroke-width="6.5"/>
+    <!-- Arms connected -->
+    <line x1="13.8" y1="61.7" x2="86.2" y2="61.7" stroke="#7a82f0"/>
   </g>
   <!-- Vertices -->
   <g fill="#818cf8">
