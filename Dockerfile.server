@@ -1,7 +1,7 @@
 # Multi-stage build for the MineGraph leaderboard server.
 # nauty (C FFI) compiles from source via cc crate.
 
-FROM rust:1.86-bookworm AS builder
+FROM rust:1.88-bookworm AS builder
 WORKDIR /app
 
 # Copy workspace manifests for dependency caching
