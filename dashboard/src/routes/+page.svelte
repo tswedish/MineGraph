@@ -85,6 +85,9 @@
 					<div class="card worker-card" class:disconnected={!w.connected}>
 						<div class="worker-header">
 							<span class="worker-id mono">{w.workerId}</span>
+							{#if w.verified}
+								<span class="badge badge-verified" title="Ed25519 verified">✓</span>
+							{/if}
 							{#if w.connected}
 								<span class="badge badge-green">live</span>
 							{:else}
@@ -94,6 +97,7 @@
 						<div class="worker-meta">
 							<span>n={w.n}</span>
 							<span class="dim">{w.strategy}</span>
+							<span class="dim mono" title="key_id">{w.keyId.slice(0, 8)}</span>
 						</div>
 
 						<!-- Progress bar -->
@@ -156,7 +160,7 @@
 				<div class="rain-column" style="width: {store.gemScale + 8}px">
 					<!-- Column header -->
 					<div class="col-header" class:disconnected={!w.connected}>
-						<span class="col-id">{w.workerId}</span>
+						<span class="col-id">{w.workerId}{#if w.verified}<span class="verified-dot" title="verified">✓</span>{/if}</span>
 						<span class="col-dot" class:live={w.connected}></span>
 						<span class="col-n">n={w.n}</span>
 					</div>

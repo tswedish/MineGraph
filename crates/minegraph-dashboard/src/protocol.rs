@@ -6,6 +6,15 @@
 
 use serde::{Deserialize, Serialize};
 
+// ── Server → Worker (challenge) ─────────────────────────────
+
+/// Server sends this immediately on worker WebSocket connect.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ServerChallenge {
+    /// 32 random bytes, hex-encoded.
+    pub nonce: String,
+}
+
 // ── Worker → Dashboard ──────────────────────────────────────
 
 /// Messages sent from a worker to the dashboard relay server.
@@ -20,6 +29,15 @@ pub enum WorkerMessage {
         strategy: String,
         #[serde(default)]
         metadata: Option<serde_json::Value>,
+        /// Ed25519 public key (hex). Used for auth verification.
+        #[serde(default)]
+        public_key_hex: Option<String>,
+        /// Signature of the server's challenge nonce (hex).
+        #[serde(default)]
+        nonce_signature: Option<String>,
+        /// Worker's HTTP API address (e.g. "http://0.0.0.0:4001").
+        #[serde(default)]
+        api_addr: Option<String>,
     },
     /// Periodic progress update (~every 100 iterations).
     Progress {
@@ -78,6 +96,12 @@ pub enum UiEvent {
         n: u32,
         strategy: String,
         metadata: Option<serde_json::Value>,
+        /// Whether the worker's Ed25519 signature was verified.
+        #[serde(default)]
+        verified: bool,
+        /// Worker's HTTP API address for CLI management.
+        #[serde(default)]
+        api_addr: Option<String>,
     },
     /// A worker disconnected.
     WorkerDisconnected { worker_id: String },

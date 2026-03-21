@@ -8,7 +8,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
-use crate::protocol::{UiEvent, WorkerMessage};
+use crate::protocol::{ServerChallenge, UiEvent, WorkerMessage};
 use crate::state::{DashboardState, WorkerInfo};
 
 // ── Worker WebSocket ────────────────────────────────────────
@@ -22,7 +22,20 @@ pub async fn ws_worker(
 }
 
 async fn handle_worker(mut socket: WebSocket, state: DashboardState) {
-    // Wait for the Register message
+    // 1. Generate and send challenge nonce
+    let nonce_bytes: [u8; 32] = rand::random();
+    let nonce_hex = hex::encode(nonce_bytes);
+
+    let challenge = ServerChallenge {
+        nonce: nonce_hex.clone(),
+    };
+    if let Ok(json) = serde_json::to_string(&challenge)
+        && socket.send(Message::Text(json.into())).await.is_err()
+    {
+        return;
+    }
+
+    // 2. Wait for Register message
     let register_msg = match wait_for_register(&mut socket).await {
         Some(msg) => msg,
         None => {
@@ -31,28 +44,67 @@ async fn handle_worker(mut socket: WebSocket, state: DashboardState) {
         }
     };
 
-    let (key_id, worker_id, n, strategy, metadata) = match register_msg {
-        WorkerMessage::Register {
-            key_id,
-            worker_id,
-            n,
-            strategy,
-            metadata,
-        } => (key_id, worker_id, n, strategy, metadata),
-        _ => {
-            warn!("first message from worker was not Register");
-            let _ = socket
-                .send(Message::Text(
-                    json!({"error": "first message must be Register"})
-                        .to_string()
-                        .into(),
-                ))
-                .await;
-            return;
+    let (key_id, worker_id, n, strategy, metadata, public_key_hex, nonce_signature, api_addr) =
+        match register_msg {
+            WorkerMessage::Register {
+                key_id,
+                worker_id,
+                n,
+                strategy,
+                metadata,
+                public_key_hex,
+                nonce_signature,
+                api_addr,
+            } => (
+                key_id,
+                worker_id,
+                n,
+                strategy,
+                metadata,
+                public_key_hex,
+                nonce_signature,
+                api_addr,
+            ),
+            _ => {
+                warn!("first message from worker was not Register");
+                let _ = socket
+                    .send(Message::Text(
+                        json!({"error": "first message must be Register"})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+    // 3. Verify Ed25519 signature of challenge nonce
+    let verified = if let (Some(pk_hex), Some(sig_hex)) =
+        (&public_key_hex, &nonce_signature)
+    {
+        match verify_worker_auth(&key_id, pk_hex, &nonce_bytes, sig_hex) {
+            Ok(true) => {
+                info!(worker_id, key_id, "worker signature verified");
+                true
+            }
+            Ok(false) => {
+                warn!(worker_id, key_id, "worker signature verification failed");
+                false
+            }
+            Err(e) => {
+                warn!(worker_id, key_id, error = %e, "worker auth error");
+                false
+            }
         }
+    } else {
+        debug!(
+            worker_id,
+            key_id, "worker connected without auth credentials"
+        );
+        false
     };
 
-    // Check auth
+    // 4. Register worker
     let info = WorkerInfo {
         worker_id: worker_id.clone(),
         key_id: key_id.clone(),
@@ -60,13 +112,15 @@ async fn handle_worker(mut socket: WebSocket, state: DashboardState) {
         strategy: strategy.clone(),
         metadata: metadata.clone(),
         connected_at: chrono::Utc::now(),
+        verified,
+        api_addr: api_addr.clone(),
     };
 
     if !state.register_worker(info).await {
-        warn!(worker_id, key_id, "worker registration rejected");
+        warn!(worker_id, key_id, verified, "worker registration rejected");
         let _ = socket
             .send(Message::Text(
-                json!({"error": "registration rejected (key not allowed or at capacity)"})
+                json!({"error": "registration rejected (key not allowed, not verified, or at capacity)"})
                     .to_string()
                     .into(),
             ))
@@ -74,21 +128,31 @@ async fn handle_worker(mut socket: WebSocket, state: DashboardState) {
         return;
     }
 
-    info!(worker_id, key_id, n, strategy, "worker connected");
+    info!(
+        worker_id,
+        key_id,
+        n,
+        strategy,
+        verified,
+        api_addr = api_addr.as_deref().unwrap_or("none"),
+        "worker connected"
+    );
 
     // Broadcast connection event to UI
     let _ = state.ui_tx.send(UiEvent::WorkerConnected {
         worker_id: worker_id.clone(),
-        key_id,
+        key_id: key_id.clone(),
         n,
         strategy,
         metadata,
+        verified,
+        api_addr: api_addr.clone(),
     });
 
     // Send ack to worker
     let _ = socket
         .send(Message::Text(
-            json!({"ok": true, "worker_id": &worker_id})
+            json!({"ok": true, "worker_id": &worker_id, "verified": verified})
                 .to_string()
                 .into(),
         ))
@@ -128,6 +192,27 @@ async fn handle_worker(mut socket: WebSocket, state: DashboardState) {
     info!(worker_id, "worker disconnected");
 }
 
+/// Verify worker authentication:
+/// 1. Compute key_id from public_key_hex, ensure it matches claimed key_id
+/// 2. Verify Ed25519 signature of the nonce
+fn verify_worker_auth(
+    claimed_key_id: &str,
+    public_key_hex: &str,
+    nonce_bytes: &[u8; 32],
+    signature_hex: &str,
+) -> Result<bool, String> {
+    // Verify key_id matches public key
+    let computed_key_id = minegraph_identity::compute_key_id_from_hex(public_key_hex)
+        .map_err(|e| format!("invalid public key: {e}"))?;
+    if computed_key_id.as_str() != claimed_key_id {
+        return Ok(false);
+    }
+
+    // Verify signature of nonce
+    minegraph_identity::verify_signature(public_key_hex, nonce_bytes, signature_hex)
+        .map_err(|e| format!("signature error: {e}"))
+}
+
 async fn wait_for_register(socket: &mut WebSocket) -> Option<WorkerMessage> {
     // Give the worker 10 seconds to register
     let timeout = tokio::time::timeout(std::time::Duration::from_secs(10), socket.recv()).await;
@@ -157,6 +242,8 @@ async fn handle_ui(mut socket: WebSocket, state: DashboardState) {
             n: w.n,
             strategy: w.strategy,
             metadata: w.metadata,
+            verified: w.verified,
+            api_addr: w.api_addr,
         };
         if let Ok(json) = serde_json::to_string(&event)
             && socket.send(Message::Text(json.into())).await.is_err()
@@ -218,6 +305,8 @@ pub async fn list_workers(State(state): State<DashboardState>) -> Json<serde_jso
                 "strategy": w.strategy,
                 "metadata": w.metadata,
                 "connected_at": w.connected_at.to_rfc3339(),
+                "verified": w.verified,
+                "api_addr": w.api_addr,
             })
         })
         .collect();

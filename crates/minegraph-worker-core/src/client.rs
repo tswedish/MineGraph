@@ -1,5 +1,7 @@
 //! HTTP client for talking to the MineGraph server.
 
+use std::sync::Arc;
+
 use minegraph_identity::{Identity, canonical_payload};
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct ServerClient {
     base_url: String,
     http: reqwest::Client,
-    identity: Option<Identity>,
+    identity: Option<Arc<Identity>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,7 +57,7 @@ struct GraphsResponse {
 
 impl ServerClient {
     /// Create a new client for the given server URL.
-    pub fn new(base_url: &str, identity: Option<Identity>) -> Self {
+    pub fn new(base_url: &str, identity: Option<Arc<Identity>>) -> Self {
         let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30))

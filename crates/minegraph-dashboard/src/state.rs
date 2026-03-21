@@ -15,6 +15,10 @@ pub struct WorkerInfo {
     pub strategy: String,
     pub metadata: Option<serde_json::Value>,
     pub connected_at: chrono::DateTime<chrono::Utc>,
+    /// Whether the worker's Ed25519 signature was verified.
+    pub verified: bool,
+    /// Worker's HTTP API address (e.g. "http://0.0.0.0:4001").
+    pub api_addr: Option<String>,
 }
 
 /// Shared state for the dashboard relay server.
@@ -41,17 +45,17 @@ impl DashboardState {
         }
     }
 
-    /// Check if a key_id is allowed (empty allow-list = open access).
-    pub async fn is_key_allowed(&self, key_id: &str) -> bool {
-        let keys = self.allowed_keys.lock().await;
-        keys.is_empty() || keys.contains(key_id)
-    }
-
     /// Register a worker. Returns false if at capacity or key not allowed.
+    ///
+    /// When allow-list is active, requires both a verified signature AND
+    /// key_id in the allow-list. When allow-list is empty (default), accepts all.
     pub async fn register_worker(&self, info: WorkerInfo) -> bool {
-        if !self.is_key_allowed(&info.key_id).await {
+        let keys = self.allowed_keys.lock().await;
+        if !keys.is_empty() && (!info.verified || !keys.contains(&info.key_id)) {
             return false;
         }
+        drop(keys);
+
         let mut workers = self.workers.lock().await;
         if workers.len() >= self.max_workers && !workers.contains_key(&info.worker_id) {
             return false;

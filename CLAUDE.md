@@ -45,6 +45,15 @@ cargo run -p minegraph-cli -- submit --n 5 --graph6 'Dhc'
 cargo run -p minegraph-cli -- leaderboard --n 25
 cargo run -p minegraph-cli -- score --n 5 --graph6 'D~{'
 cargo run -p minegraph-cli -- health
+
+# Worker management (via dashboard relay)
+cargo run -p minegraph-cli -- workers --relay http://localhost:4000 list
+cargo run -p minegraph-cli -- workers status fleet-1
+cargo run -p minegraph-cli -- workers config fleet-1
+cargo run -p minegraph-cli -- workers set fleet-1 beam_width=200 sample_bias=0.5
+cargo run -p minegraph-cli -- workers pause fleet-1
+cargo run -p minegraph-cli -- workers resume fleet-1
+cargo run -p minegraph-cli -- workers stop fleet-1
 ```
 
 Other commands: `./run clippy`, `./run fmt`, `./run server`, `./run worker`, `./run dashboard`, `./run dashboard-ui`, `./run web-dev`, `./run web-build`.
@@ -66,6 +75,9 @@ Rust workspace (`crates/`) with 12 crates + 2 SvelteKit web apps + shared compon
 - **Paley graph fallback** for cold-start seeding
 - **Dashboard relay server** for worker monitoring (separate from leaderboard server)
 - **WebSocket telemetry** from workers to dashboard relay
+- **Ed25519 challenge/response auth** for dashboard worker connections
+- **Worker HTTP API** for runtime parameter adjustment and pause/resume/stop
+- **CLI worker management** via dashboard relay discovery + direct worker API
 
 ## Crate Dependency Graph
 
@@ -115,23 +127,20 @@ All 12 backend crates implemented and working end-to-end. 82 tests passing.
 - `minegraph-identity` — Ed25519 keypair, signing, verification, key file I/O (single source of truth)
 - `minegraph-store` — PostgreSQL models, 2 migrations, 20+ repository methods, lightweight leaderboard admission (no full-table rerank)
 - `minegraph-server` — Axum API (11 endpoints): health, leaderboards, submit, verify, identity, SSE events (enriched with graph6/scores), signed receipts. Structured logging for submissions/admissions/connections.
-- `minegraph-worker-api` — SearchStrategy trait, SearchJob/Result, SearchObserver (CollectingObserver), WorkerCommand/Event/Status, ConfigParam
-- `minegraph-strategies` — tree2 beam search (passes R(3,3)/n=5 and R(4,4)/n=17 tests), Paley graph init, perturb
-- `minegraph-worker-core` — Engine loop with server client, leaderboard CID sync, biased seed sampling, Paley fallback for cold start, DashboardObserver for real-time telemetry, priority-sorted submit buffer (best graphs submitted first), throttled progress events (4 Hz)
-- `minegraph-worker` — Full CLI binary: n, target_k, target_ell, beam_width, max_depth, sample_bias, focused, offline, signing key, metadata, dashboard URL
-- `minegraph-cli` — init, keygen (with --output), whoami, register-key, score (local), submit, leaderboard, health
-- `minegraph-dashboard` — Standalone Axum relay server: worker WebSocket endpoint, browser WebSocket endpoint (multiplexed), REST API for worker listing, key_id allow-list auth (default open), static file serving
+- `minegraph-worker-api` — SearchStrategy trait, SearchJob/Result, SearchObserver (CollectingObserver), WorkerCommand/Event/Status, ConfigParam (with `adjustable` flag)
+- `minegraph-strategies` — tree2 beam search (passes R(3,3)/n=5 and R(4,4)/n=17 tests), Paley graph init, perturb. ConfigParam adjustability: beam_width/max_depth/focused=adjustable, target_k/target_ell=init-only
+- `minegraph-worker-core` — Engine loop with server client, leaderboard CID sync, biased seed sampling, Paley fallback for cold start, DashboardObserver for real-time telemetry, priority-sorted submit buffer (best graphs submitted first), throttled progress events (4 Hz), **command channel** (pause/resume/stop/config-update between rounds), **HTTP API server** (status, config, control), **EngineSnapshot** watch channel for API
+- `minegraph-worker` — Full CLI binary: n, target_k, target_ell, beam_width, max_depth, sample_bias, focused, offline, signing key, metadata, dashboard URL, **--api-port** for control API
+- `minegraph-cli` — init, keygen (with --output), whoami, register-key, score (local), submit, leaderboard, health, **workers** (list/status/config/set/pause/resume/stop via relay discovery + direct worker API)
+- `minegraph-dashboard` — Standalone Axum relay server: worker WebSocket endpoint, browser WebSocket endpoint (multiplexed), REST API for worker listing, **Ed25519 challenge/response auth** (default open, verified flag), static file serving, **api_addr** in worker info for CLI discovery
 - **Server web app** (`web/`) — SvelteKit: home, leaderboards (paginated with GemView), activity dashboard (submission-inferred), rain visualization (SSE-driven), submission detail, identity profiles
 - **Worker dashboard** (`dashboard/`) — SvelteKit: monitor mode (live worker stats, progress bars, gem thumbnails), rain mode (vertical gem columns per worker, current search at top, best-found pool below), controls (gem size, fade duration 10m-8h, history depth 10-200), fullscreen mode
 - **Shared components** (`packages/shared/`) — GemView (diamond adjacency matrix), GemViewSquare (rain variant), GemPopup (detail modal), graph6 decoder
 
 ### TODO
-1. Server rain rewrite — column-based layout driven by SSE submission events (Phase 6 of dashboard plan)
-2. Evo strategy port
-3. Production hardening (rate limiting, connection pool tuning)
-4. Dashboard auth — Ed25519 challenge/response for worker registration (currently just key_id check)
-5. Column drag reorder in rain mode
-6. Worker command/control via dashboard (pause/resume/reconfigure)
+1. Evo strategy port
+2. Production hardening (rate limiting, connection pool tuning)
+3. Column drag reorder in rain mode
 
 ## Key Design Decisions
 
@@ -192,7 +201,30 @@ Port 4000. Separate from the leaderboard server.
 | `/api/workers` | GET | List connected workers |
 | `/api/config` | GET | Dashboard configuration |
 
-**Protocol**: Workers send `Register`, `Progress`, `Discovery`, `RoundComplete` messages. Dashboard relays to browser as `WorkerConnected`, `WorkerDisconnected`, `WorkerEvent` envelopes.
+**Auth**: Ed25519 challenge/response. Server sends 32-byte random nonce on connect. Worker signs nonce with Ed25519 key, includes `public_key_hex` + `nonce_signature` in Register message. Server verifies key_id matches public key and signature is valid. Default mode (no allow-list): accepts all, logs verification result (`verified: true/false`). Allow-list mode: rejects unverified or unlisted keys.
+
+**Protocol**: Workers send `Register` (with optional auth fields + `api_addr`), `Progress`, `Discovery`, `RoundComplete` messages. Dashboard relays to browser as `WorkerConnected` (with `verified`, `api_addr`), `WorkerDisconnected`, `WorkerEvent` envelopes.
+
+## Worker HTTP API
+
+Each worker runs a local Axum HTTP API server for runtime control. Port is configurable via `--api-port` (default: 0 = auto-assign). The worker advertises its API address via the dashboard relay's `api_addr` field.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/status` | GET | Engine state, round, metrics |
+| `/api/config` | GET | All params with values + adjustability |
+| `/api/config` | POST | Patch adjustable params (JSON body) |
+| `/api/pause` | POST | Pause after current round |
+| `/api/resume` | POST | Resume from paused state |
+| `/api/stop` | POST | Graceful shutdown |
+
+**Adjustable params** (can be changed at runtime between rounds):
+- Engine: `max_iters`, `sample_bias`, `noise_flips`, `max_submissions_per_round`
+- tree2 strategy: `beam_width`, `max_depth`, `focused`
+
+**Init-only params** (fixed at startup): `n`, `target_k`, `target_ell`, `server_url`, `strategy_id`
+
+Commands are processed between rounds (not mid-search). A round typically takes 0.5–10s.
 
 ## Worker Configuration
 
@@ -209,6 +241,7 @@ Port 4000. Separate from the leaderboard server.
 --offline                 Local-only (no server)
 --signing-key PATH        Ed25519 key (or auto-detect .config/minegraph/key.json)
 --dashboard URL            Dashboard relay WebSocket URL
+--api-port PORT            Worker control API port (0=auto, default 0)
 --metadata JSON            Metadata JSON (max 4KB, attached to submissions)
 ```
 

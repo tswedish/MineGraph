@@ -1,11 +1,13 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use clap::Parser;
 use minegraph_identity::Identity;
 use minegraph_strategies::default_strategies;
+use minegraph_worker_core::api::run_api_server;
 use minegraph_worker_core::client::ServerClient;
-use minegraph_worker_core::engine::{EngineConfig, run_engine};
-use tokio::sync::watch;
+use minegraph_worker_core::engine::{EngineCommand, EngineConfig, EngineSnapshot, run_engine};
+use tokio::sync::{mpsc, watch};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -84,6 +86,10 @@ struct Cli {
     /// Streams real-time search telemetry to the dashboard.
     #[arg(long)]
     dashboard: Option<String>,
+
+    /// Port for the worker control API (0 = auto-assign).
+    #[arg(long, default_value = "0")]
+    api_port: u16,
 }
 
 #[tokio::main]
@@ -97,11 +103,11 @@ async fn main() {
     let cli = Cli::parse();
 
     // Load signing identity
-    let identity = if let Some(ref path) = cli.signing_key {
+    let identity: Option<Arc<Identity>> = if let Some(ref path) = cli.signing_key {
         match Identity::load(std::path::Path::new(path)) {
             Ok(id) => {
                 tracing::info!(key_id = %id.key_id, "loaded signing key");
-                Some(id)
+                Some(Arc::new(id))
             }
             Err(e) => {
                 tracing::error!("failed to load signing key: {e}");
@@ -114,7 +120,7 @@ async fn main() {
             match Identity::load(default_path) {
                 Ok(id) => {
                     tracing::info!(key_id = %id.key_id, "loaded default signing key");
-                    Some(id)
+                    Some(Arc::new(id))
                 }
                 Err(e) => {
                     tracing::warn!("failed to load default key: {e}");
@@ -175,7 +181,7 @@ async fn main() {
 
     // Build server client
     let client = if !cli.offline {
-        Some(ServerClient::new(&cli.server, identity))
+        Some(ServerClient::new(&cli.server, identity.clone()))
     } else {
         None
     };
@@ -192,5 +198,64 @@ async fn main() {
         let _ = shutdown_tx.send(true);
     });
 
-    run_engine(config, strategies, client, shutdown_rx).await;
+    // Create command channel for API → engine communication
+    let (cmd_tx, cmd_rx) = mpsc::channel::<EngineCommand>(32);
+
+    // Create initial snapshot for the watch channel
+    let initial_snapshot = EngineSnapshot {
+        state: minegraph_worker_api::WorkerState::Idle,
+        round: 0,
+        n: config.n,
+        strategy: config.strategy_id.clone(),
+        worker_id: config
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("worker_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("default")
+            .to_string(),
+        key_id: identity
+            .as_ref()
+            .map(|id| id.key_id.as_str().to_string())
+            .unwrap_or_default(),
+        config: minegraph_worker_core::engine::ConfigSnapshot { params: vec![] },
+        metrics: minegraph_worker_core::engine::EngineMetrics {
+            total_discoveries: 0,
+            total_submitted: 0,
+            total_admitted: 0,
+            submit_buffer_size: 0,
+            known_cids_count: 0,
+            server_cids_count: 0,
+            last_round_ms: 0,
+        },
+    };
+    let (snapshot_tx, snapshot_rx) = watch::channel(initial_snapshot);
+
+    // Start worker HTTP API server
+    let api_addr_str = {
+        let bind_addr: SocketAddr = ([0, 0, 0, 0], cli.api_port).into();
+        match run_api_server(bind_addr, cmd_tx, snapshot_rx).await {
+            Ok(addr) => {
+                let api_url = format!("http://0.0.0.0:{}", addr.port());
+                tracing::info!(api = %api_url, "worker API server ready");
+                Some(api_url)
+            }
+            Err(e) => {
+                tracing::warn!("failed to start worker API server: {e}");
+                None
+            }
+        }
+    };
+
+    run_engine(
+        config,
+        strategies,
+        client,
+        identity,
+        shutdown_rx,
+        Some(cmd_rx),
+        Some(snapshot_tx),
+        api_addr_str,
+    )
+    .await;
 }

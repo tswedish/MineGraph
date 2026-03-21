@@ -99,6 +99,7 @@ impl SearchStrategy for Tree2Search {
                     max: 10_000,
                 },
                 default: serde_json::json!(100),
+                adjustable: true,
             },
             ConfigParam {
                 name: "max_depth".into(),
@@ -106,6 +107,7 @@ impl SearchStrategy for Tree2Search {
                 description: "Number of depth levels to search".into(),
                 param_type: ParamType::Int { min: 1, max: 100 },
                 default: serde_json::json!(10),
+                adjustable: true,
             },
             ConfigParam {
                 name: "focused".into(),
@@ -113,6 +115,7 @@ impl SearchStrategy for Tree2Search {
                 description: "Only flip edges participating in violations".into(),
                 param_type: ParamType::Bool,
                 default: serde_json::json!(false),
+                adjustable: true,
             },
             ConfigParam {
                 name: "target_k".into(),
@@ -120,6 +123,7 @@ impl SearchStrategy for Tree2Search {
                 description: "Clique size to minimize in graph (red)".into(),
                 param_type: ParamType::Int { min: 3, max: 10 },
                 default: serde_json::json!(5),
+                adjustable: false,
             },
             ConfigParam {
                 name: "target_ell".into(),
@@ -127,6 +131,7 @@ impl SearchStrategy for Tree2Search {
                 description: "Clique size to minimize in complement (blue)".into(),
                 param_type: ParamType::Int { min: 3, max: 10 },
                 default: serde_json::json!(5),
+                adjustable: false,
             },
         ]
     }

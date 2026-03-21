@@ -6,6 +6,7 @@
 //! 3. Run strategy search
 //! 4. Score and submit discoveries
 
+pub mod api;
 pub mod client;
 pub mod dashboard;
 pub mod engine;

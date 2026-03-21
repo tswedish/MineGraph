@@ -88,6 +88,55 @@ enum Commands {
         #[arg(long, default_value = "http://localhost:3001")]
         server: String,
     },
+
+    /// Manage workers via the dashboard relay.
+    Workers {
+        /// Dashboard relay URL.
+        #[arg(long, default_value = "http://localhost:4000")]
+        relay: String,
+
+        #[command(subcommand)]
+        action: WorkerAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkerAction {
+    /// List connected workers.
+    List,
+    /// Get detailed worker status.
+    Status {
+        /// Worker ID (exact or prefix match).
+        worker: String,
+    },
+    /// Show worker configuration with adjustability info.
+    Config {
+        /// Worker ID (exact or prefix match).
+        worker: String,
+    },
+    /// Update worker parameters.
+    Set {
+        /// Worker ID (exact or prefix match).
+        worker: String,
+        /// Parameters as key=value (e.g. beam_width=200 sample_bias=0.5).
+        #[arg(required = true)]
+        params: Vec<String>,
+    },
+    /// Pause worker after current round.
+    Pause {
+        /// Worker ID (exact or prefix match).
+        worker: String,
+    },
+    /// Resume paused worker.
+    Resume {
+        /// Worker ID (exact or prefix match).
+        worker: String,
+    },
+    /// Stop worker gracefully.
+    Stop {
+        /// Worker ID (exact or prefix match).
+        worker: String,
+    },
 }
 
 fn config_dir() -> PathBuf {
@@ -288,7 +337,231 @@ async fn main() -> Result<()> {
             let data: serde_json::Value = resp.json().await?;
             println!("{}", serde_json::to_string_pretty(&data)?);
         }
+
+        Commands::Workers { relay, action } => {
+            handle_workers_command(&relay, action).await?;
+        }
     }
 
     Ok(())
+}
+
+// ── Worker management commands ──────────────────────────────
+
+async fn handle_workers_command(relay: &str, action: WorkerAction) -> Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+
+    match action {
+        WorkerAction::List => {
+            let resp = client
+                .get(format!("{relay}/api/workers"))
+                .send()
+                .await?;
+            let data: serde_json::Value = resp.json().await?;
+
+            let workers = data["workers"].as_array();
+            let count = data["count"].as_u64().unwrap_or(0);
+            println!("Workers ({count} connected via {relay}):");
+
+            if let Some(workers) = workers {
+                if workers.is_empty() {
+                    println!("  (none)");
+                }
+                for w in workers {
+                    let wid = w["worker_id"].as_str().unwrap_or("?");
+                    let kid = w["key_id"].as_str().unwrap_or("?");
+                    let n = w["n"].as_u64().unwrap_or(0);
+                    let strat = w["strategy"].as_str().unwrap_or("?");
+                    let verified = if w["verified"].as_bool().unwrap_or(false) {
+                        "verified"
+                    } else {
+                        "unverified"
+                    };
+                    let api = w["api_addr"]
+                        .as_str()
+                        .unwrap_or("(no API)");
+                    println!("  {wid:<16} key={kid:<16} n={n:<4} {strat:<8} {verified:<12} {api}");
+                }
+            }
+        }
+
+        WorkerAction::Status { worker } => {
+            let api_addr = resolve_worker_api(&client, relay, &worker).await?;
+            let resp = client
+                .get(format!("{api_addr}/api/status"))
+                .send()
+                .await?;
+            let data: serde_json::Value = resp.json().await?;
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+
+        WorkerAction::Config { worker } => {
+            let api_addr = resolve_worker_api(&client, relay, &worker).await?;
+            let resp = client
+                .get(format!("{api_addr}/api/config"))
+                .send()
+                .await?;
+            let data: serde_json::Value = resp.json().await?;
+
+            if let Some(params) = data["params"].as_array() {
+                println!("Configuration for {worker}:");
+                for p in params {
+                    let name = p["param"]["name"].as_str().unwrap_or("?");
+                    let value = &p["value"];
+                    let adjustable = p["param"]["adjustable"].as_bool().unwrap_or(false);
+                    let source = p["source"].as_str().unwrap_or("?");
+                    let adj_marker = if adjustable { "" } else { " (fixed)" };
+                    println!("  {name:<30} = {value:<12} [{source}]{adj_marker}");
+                }
+            } else {
+                println!("{}", serde_json::to_string_pretty(&data)?);
+            }
+        }
+
+        WorkerAction::Set { worker, params } => {
+            let api_addr = resolve_worker_api(&client, relay, &worker).await?;
+
+            // Parse key=value pairs
+            let mut patch = serde_json::Map::new();
+            for param in &params {
+                let (key, val_str) = param
+                    .split_once('=')
+                    .ok_or_else(|| anyhow::anyhow!("invalid param format: {param} (expected key=value)"))?;
+
+                // Try to parse as number first, then bool, then string
+                let value: serde_json::Value = if let Ok(v) = val_str.parse::<i64>() {
+                    serde_json::json!(v)
+                } else if let Ok(v) = val_str.parse::<f64>() {
+                    serde_json::json!(v)
+                } else if val_str == "true" {
+                    serde_json::json!(true)
+                } else if val_str == "false" {
+                    serde_json::json!(false)
+                } else {
+                    serde_json::json!(val_str)
+                };
+
+                patch.insert(key.to_string(), value);
+            }
+
+            let resp = client
+                .post(format!("{api_addr}/api/config"))
+                .json(&patch)
+                .send()
+                .await?;
+            let data: serde_json::Value = resp.json().await?;
+
+            if let Some(applied) = data["applied"].as_array()
+                && !applied.is_empty()
+            {
+                let round = data["effective_round"].as_u64().unwrap_or(0);
+                println!("Updated {worker} (effective round {round}):");
+                for name in applied {
+                    println!("  {}", name.as_str().unwrap_or("?"));
+                }
+            }
+            if let Some(errors) = data["errors"].as_array() {
+                for err in errors {
+                    if let Some(arr) = err.as_array()
+                        && arr.len() == 2
+                    {
+                        println!(
+                            "  error: {} — {}",
+                            arr[0].as_str().unwrap_or("?"),
+                            arr[1].as_str().unwrap_or("?")
+                        );
+                    }
+                }
+            }
+        }
+
+        WorkerAction::Pause { worker } => {
+            let api_addr = resolve_worker_api(&client, relay, &worker).await?;
+            let resp = client
+                .post(format!("{api_addr}/api/pause"))
+                .send()
+                .await?;
+            let data: serde_json::Value = resp.json().await?;
+            if data["ok"].as_bool().unwrap_or(false) {
+                println!("Paused {worker}");
+            } else {
+                println!("Failed: {data}");
+            }
+        }
+
+        WorkerAction::Resume { worker } => {
+            let api_addr = resolve_worker_api(&client, relay, &worker).await?;
+            let resp = client
+                .post(format!("{api_addr}/api/resume"))
+                .send()
+                .await?;
+            let data: serde_json::Value = resp.json().await?;
+            if data["ok"].as_bool().unwrap_or(false) {
+                println!("Resumed {worker}");
+            } else {
+                println!("Failed: {data}");
+            }
+        }
+
+        WorkerAction::Stop { worker } => {
+            let api_addr = resolve_worker_api(&client, relay, &worker).await?;
+            let resp = client
+                .post(format!("{api_addr}/api/stop"))
+                .send()
+                .await?;
+            let data: serde_json::Value = resp.json().await?;
+            if data["ok"].as_bool().unwrap_or(false) {
+                println!("Stopped {worker}");
+            } else {
+                println!("Failed: {data}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Resolve a worker ID to its API address via the relay server.
+async fn resolve_worker_api(
+    client: &reqwest::Client,
+    relay: &str,
+    worker_id: &str,
+) -> Result<String> {
+    let resp = client
+        .get(format!("{relay}/api/workers"))
+        .send()
+        .await?;
+    let data: serde_json::Value = resp.json().await?;
+
+    let workers = data["workers"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("unexpected response from relay"))?;
+
+    // Exact match first, then prefix match
+    let worker = workers
+        .iter()
+        .find(|w| w["worker_id"].as_str() == Some(worker_id))
+        .or_else(|| {
+            workers
+                .iter()
+                .find(|w| {
+                    w["worker_id"]
+                        .as_str()
+                        .is_some_and(|id| id.starts_with(worker_id))
+                })
+        })
+        .ok_or_else(|| anyhow::anyhow!("worker '{worker_id}' not found on relay"))?;
+
+    let api_addr = worker["api_addr"]
+        .as_str()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "worker '{}' has no API endpoint (upgrade worker binary or use --api-port)",
+                worker["worker_id"].as_str().unwrap_or(worker_id)
+            )
+        })?;
+
+    Ok(api_addr.to_string())
 }

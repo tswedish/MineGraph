@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."
 
 N=${1:-25}
 DASHBOARD="${2:-ws://localhost:4000/ws/worker}"
+API_PORT_BASE="${3:-0}"
 SERVER="http://localhost:3001"
 LOG_DIR="logs/experiment-$(date +%Y%m%d-%H%M%S)"
 
@@ -40,11 +41,13 @@ trap cleanup INT TERM
 
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DASH="--dashboard $DASHBOARD"
+WORKER_NUM=0
 
 # Launch a worker with full metadata including all strategy parameters
 launch() {
     local name="$1"; shift
     local log="$LOG_DIR/$name.log"
+    WORKER_NUM=$((WORKER_NUM + 1))
 
     # Parse args to build metadata
     local beam_width="" max_depth="" sample_bias="" noise_flips="" focused="false"
@@ -61,12 +64,18 @@ launch() {
 
     local meta="{\"worker_id\":\"$name\",\"commit_hash\":\"$COMMIT\",\"strategy\":\"tree2\",\"beam_width\":${beam_width:-100},\"max_depth\":${max_depth:-12},\"sample_bias\":${sample_bias:-0.5},\"noise_flips\":${noise_flips:-0},\"focused\":${focused}}"
 
+    local api_flag=""
+    if [[ "$API_PORT_BASE" -gt 0 ]]; then
+        api_flag="--api-port $((API_PORT_BASE + WORKER_NUM - 1))"
+    fi
+
     echo "  $name -> $log"
     NO_COLOR=1 RUST_LOG=info "$BIN" \
         --server "$SERVER" \
         --n "$N" \
         --metadata "$meta" \
         $DASH \
+        $api_flag \
         "$@" \
         > "$log" 2>&1 &
     PIDS+=($!)

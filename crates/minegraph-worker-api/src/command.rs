@@ -106,6 +106,9 @@ pub struct ConfigParam {
     pub description: String,
     pub param_type: ParamType,
     pub default: serde_json::Value,
+    /// Whether this parameter can be changed at runtime (between rounds).
+    #[serde(default)]
+    pub adjustable: bool,
 }
 
 /// Type constraint for a config parameter.

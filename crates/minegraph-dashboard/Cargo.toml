@@ -21,6 +21,8 @@ tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 
 anyhow = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }
 
 # Local crates
 minegraph-identity = { path = "../minegraph-identity" }

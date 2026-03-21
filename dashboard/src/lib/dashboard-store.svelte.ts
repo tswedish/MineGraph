@@ -42,6 +42,8 @@ export interface UiEvent {
 	n?: number;
 	strategy?: string;
 	metadata?: Record<string, any>;
+	verified?: boolean;
+	api_addr?: string;
 	// WorkerEvent
 	event?: WorkerMessage;
 }
@@ -55,6 +57,7 @@ export interface WorkerState {
 	strategy: string;
 	metadata: Record<string, any> | null;
 	connected: boolean;
+	verified: boolean;
 	// Live progress
 	iteration: number;
 	maxIters: number;
@@ -215,6 +218,7 @@ class DashboardStore {
 						strategy: event.strategy ?? '',
 						metadata: event.metadata ?? null,
 						connected: true,
+						verified: event.verified ?? false,
 						iteration: 0,
 						maxIters: 0,
 						violationScore: 0,
