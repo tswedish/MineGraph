@@ -4,6 +4,7 @@ use futures_core::Stream;
 use std::convert::Infallible;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
+use tracing::info;
 
 use crate::state::AppState;
 
@@ -11,15 +12,16 @@ use crate::state::AppState;
 pub async fn event_stream(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let subscribers = state.events_tx.receiver_count();
+    info!(subscribers, "SSE client connected");
+
     let rx = state.events_tx.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(|result| {
-        match result {
-            Ok(event) => {
-                let json = serde_json::to_string(&event).ok()?;
-                Some(Ok(Event::default().data(json)))
-            }
-            Err(_) => None, // Lagged — skip missed events
+    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
+        Ok(event) => {
+            let json = serde_json::to_string(&event).ok()?;
+            Some(Ok(Event::default().data(json)))
         }
+        Err(_) => None, // Lagged — skip missed events
     });
     Sse::new(stream)
 }

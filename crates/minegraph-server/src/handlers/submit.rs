@@ -9,6 +9,8 @@ use minegraph_scoring::goodman;
 use minegraph_scoring::histogram::CliqueHistogram;
 use minegraph_scoring::score::GraphScore;
 
+use tracing::info;
+
 use crate::error::ApiError;
 use crate::state::{AppState, ServerEvent};
 
@@ -138,8 +140,17 @@ pub async fn submit_graph(
         )
         .await?;
 
-    // 9. Broadcast event
+    // 9. Broadcast event + log
     if let Some(rank) = admitted {
+        info!(
+            n = req.n,
+            rank,
+            cid = %cid_hex,
+            key_id = %req.key_id,
+            goodman_gap = scored.score.goodman_gap,
+            aut_order = scored.score.aut_order,
+            "admission"
+        );
         let _ = state.events_tx.send(ServerEvent::Admission {
             n: req.n as i32,
             cid: cid_hex.clone(),
@@ -151,6 +162,12 @@ pub async fn submit_graph(
             metadata: req.metadata.clone(),
         });
     } else {
+        info!(
+            n = req.n,
+            cid = %cid_hex,
+            key_id = %req.key_id,
+            "submission (not admitted)"
+        );
         let _ = state.events_tx.send(ServerEvent::Submission {
             n: req.n as i32,
             cid: cid_hex.clone(),

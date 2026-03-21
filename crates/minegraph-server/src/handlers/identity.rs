@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 
 use minegraph_identity::compute_key_id_from_hex;
 
+use tracing::info;
+
 use crate::error::ApiError;
 use crate::state::AppState;
 
@@ -35,6 +37,12 @@ pub async fn register_key(
             req.github_repo.as_deref(),
         )
         .await?;
+
+    info!(
+        key_id = %identity.key_id,
+        display_name = identity.display_name.as_deref().unwrap_or("-"),
+        "key registered"
+    );
 
     Ok(Json(json!({
         "key_id": identity.key_id,
