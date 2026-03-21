@@ -1,7 +1,7 @@
 # Algorithm Improvement Ideas
 
 Prioritized list of algorithmic improvements for future experiments.
-Based on the RamseyNet prototype's research and experiment results.
+Based on research and experiment results.
 
 ## Priority 1: Circulant Enumeration
 
@@ -25,7 +25,7 @@ Currently each round starts fresh with no memory of what was already explored.
 tabu set before adding candidates to the beam.
 
 **Expected impact**: Prevents re-exploring the same local optima across rounds.
-The prototype measured ~15% improvement in discovery rate.
+Early experiments measured ~15% improvement in discovery rate.
 
 ## Priority 3: Score-Aware Valid-Space Walk
 
@@ -40,7 +40,7 @@ that improve the score.
 
 ## Priority 4: Population-Based Search (Evo Strategy Port)
 
-Port the evolutionary simulated annealing strategy from the prototype.
+Port the evolutionary simulated annealing strategy.
 Maintains a population of candidate graphs with crossover and mutation.
 
 **Key features to port:**

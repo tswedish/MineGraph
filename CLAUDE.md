@@ -1,7 +1,6 @@
 # MineGraph v1
 
-Combinatorial graph search game with competitive leaderboards. Clean rewrite
-of the RamseyNet prototype at `~/RamseyNet-dev/`.
+Combinatorial graph search game with competitive leaderboards.
 
 ## Quick Start
 
@@ -39,17 +38,16 @@ Logging: `RUST_LOG=debug cargo run -p minegraph-server` (default: info).
 
 ## Architecture
 
-Rust workspace (`crates/`) with 11 crates. Key differences from prototype:
-- **graph6** format (not RGXF)
-- **blake3** hashing (not SHA-256)
-- **PostgreSQL** via sqlx (not SQLite)
-- **Full k-clique histogram** scoring (not 4-tier)
-- **Signatures required** (no anonymous submissions)
-- **Shared identity crate** (no signing code duplication)
+Rust workspace (`crates/`) with 11 crates:
+- **graph6** format for graph encoding
+- **blake3** hashing for CIDs
+- **PostgreSQL** via sqlx
+- **Full k-clique histogram** scoring (lexicographic)
+- **Ed25519 signatures required** (no anonymous submissions)
 - **Server is API-only** (web apps are separate)
-- **Leaderboards indexed by n only** (not k,ell,n)
-- **SSE for real-time updates** (not WebSocket)
-- **Paley graph fallback** for cold-start seeding (no empty leaderboard problem)
+- **Leaderboards indexed by n only**
+- **SSE for real-time updates**
+- **Paley graph fallback** for cold-start seeding
 
 ## Crate Dependency Graph
 
@@ -83,7 +81,7 @@ All 11 backend crates implemented and working end-to-end. 62 tests passing.
 - `minegraph-store` — PostgreSQL models, 2 migrations, 20+ repository methods, lightweight leaderboard admission (no full-table rerank)
 - `minegraph-server` — Axum API (13 endpoints): health, leaderboards, submit, verify, identity, SSE events, signed receipts, modular handlers
 - `minegraph-worker-api` — SearchStrategy trait, SearchJob/Result, SearchObserver (CollectingObserver), WorkerCommand/Event/Status, ConfigParam
-- `minegraph-strategies` — tree2 beam search ported from prototype (passes R(3,3)/n=5 and R(4,4)/n=17 tests), Paley graph init, perturb
+- `minegraph-strategies` — tree2 beam search (passes R(3,3)/n=5 and R(4,4)/n=17 tests), Paley graph init, perturb
 - `minegraph-worker-core` — Engine loop with server client, leaderboard CID sync, biased seed sampling, Paley fallback for cold start, CollectingObserver for discovery capture
 - `minegraph-worker` — Full CLI binary: n, target_k, target_ell, beam_width, max_depth, sample_bias, focused, offline, signing key, metadata
 - `minegraph-cli` — init, keygen (with --output), whoami, register-key, score (local), submit, leaderboard, health
@@ -193,16 +191,12 @@ export SERVER_KEY_PATH=.config/minegraph/server-key.json
 cargo run -p minegraph-server -- --migrate
 ```
 
-## Prototype Reference
+## TODO
 
-The RamseyNet prototype at `~/RamseyNet-dev/` has:
-- Evolutionary SA strategy (evo) — not yet ported
-- Fleet/experiment infrastructure — not yet ported
-- GemView rendering — not yet ported
-- SvelteKit leaderboard web app — to be rebuilt
-- nauty canonical labeling + automorphism — to be ported
-
-See `~/RamseyNet-dev/CLAUDE.md` for prototype details.
+- Canonical labeling via nauty (CIDs currently non-canonical)
+- Web apps (SvelteKit leaderboard + dashboard)
+- Evo strategy port
+- Production hardening (rate limiting, connection pool tuning)
 
 ## Testing
 
