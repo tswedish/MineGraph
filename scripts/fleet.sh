@@ -108,7 +108,7 @@ for i in $(seq 1 "$WORKERS"); do
         --max-depth "$MAX_DEPTH" \
         --sample-bias "$SAMPLE_BIAS" \
         --max-iters "$MAX_ITERS" \
-        --metadata "{\"worker_id\":\"fleet-$i\",\"commit_hash\":\"$COMMIT_HASH\"}" \
+        --metadata "{\"worker_id\":\"fleet-$i\",\"commit_hash\":\"$COMMIT_HASH\",\"strategy\":\"tree2\",\"beam_width\":$BEAM_WIDTH,\"max_depth\":$MAX_DEPTH,\"sample_bias\":$SAMPLE_BIAS,\"noise_flips\":0}" \
         $DASH_FLAG \
         > "$LOG_FILE" 2>&1 &
     PIDS+=($!)

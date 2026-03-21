@@ -81,7 +81,7 @@ class DashboardStore {
 	workers = $state<Map<string, WorkerState>>(new Map());
 	mode = $state<'monitor' | 'rain'>('monitor');
 	gemScale = $state(100);
-	fadeDuration = $state(120);
+	fadeDuration = $state(3600); // 1 hour default, in seconds
 	maxGemsPerColumn = $state(MAX_GEMS_PER_WORKER);
 	showInfo = $state(true);
 	columnOrder = $state<string[]>([]);
@@ -323,6 +323,7 @@ class DashboardStore {
 		localStorage.setItem('mg-dash-url', this.serverUrl);
 		localStorage.setItem('mg-dash-scale', String(this.gemScale));
 		localStorage.setItem('mg-dash-fade', String(this.fadeDuration));
+		localStorage.setItem('mg-dash-gems', String(this.maxGemsPerColumn));
 		localStorage.setItem('mg-dash-mode', this.mode);
 		localStorage.setItem('mg-dash-info', String(this.showInfo));
 	}
@@ -332,6 +333,7 @@ class DashboardStore {
 		this.serverUrl = localStorage.getItem('mg-dash-url') ?? this.serverUrl;
 		this.gemScale = Number(localStorage.getItem('mg-dash-scale')) || this.gemScale;
 		this.fadeDuration = Number(localStorage.getItem('mg-dash-fade')) || this.fadeDuration;
+		this.maxGemsPerColumn = Number(localStorage.getItem('mg-dash-gems')) || this.maxGemsPerColumn;
 		this.mode = (localStorage.getItem('mg-dash-mode') as 'monitor' | 'rain') || this.mode;
 		this.showInfo = localStorage.getItem('mg-dash-info') !== 'false';
 	}

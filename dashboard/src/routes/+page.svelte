@@ -136,8 +136,13 @@
 				</label>
 				<label class="control">
 					<span>Fade</span>
-					<input type="range" min="10" max="600" bind:value={store.fadeDuration} onchange={() => store.saveSettings()} />
-					<span class="mono">{store.fadeDuration}s</span>
+					<input type="range" min="600" max="28800" step="600" bind:value={store.fadeDuration} onchange={() => store.saveSettings()} />
+					<span class="mono">{store.fadeDuration >= 3600 ? (store.fadeDuration / 3600).toFixed(1) + 'h' : Math.round(store.fadeDuration / 60) + 'm'}</span>
+				</label>
+				<label class="control">
+					<span>History</span>
+					<input type="range" min="10" max="200" step="10" bind:value={store.maxGemsPerColumn} onchange={() => store.saveSettings()} />
+					<span class="mono">{store.maxGemsPerColumn}</span>
 				</label>
 				<button class="ctrl-btn" onclick={() => { store.showInfo = false; store.saveSettings(); }}>Fullscreen</button>
 			</div>
@@ -155,6 +160,19 @@
 						<span class="col-dot" class:live={w.connected}></span>
 						<span class="col-n">n={w.n}</span>
 					</div>
+
+					<!-- Current search representative (top of column) -->
+					{#if w.currentGraph6}
+						<div class="current-rep">
+							<GemViewSquare
+								graph6={w.currentGraph6}
+								n={w.n}
+								size={store.gemScale}
+								opacity={0.4}
+								invalid={w.violationScore > 0}
+							/>
+						</div>
+					{/if}
 
 					<!-- Best gems stack -->
 					<div class="gem-stack">
@@ -177,19 +195,6 @@
 							</div>
 						{/each}
 					</div>
-
-					<!-- Current search representative -->
-					{#if w.currentGraph6}
-						<div class="current-rep">
-							<GemViewSquare
-								graph6={w.currentGraph6}
-								n={w.n}
-								size={store.gemScale}
-								opacity={0.4}
-								invalid={w.violationScore > 0}
-							/>
-						</div>
-					{/if}
 				</div>
 			{/each}
 
@@ -378,9 +383,9 @@
 	}
 
 	.current-rep {
-		margin-top: auto;
-		padding-top: 4px;
-		border-top: 1px solid rgba(42, 42, 58, 0.2);
+		padding-bottom: 4px;
+		margin-bottom: 2px;
+		border-bottom: 1px solid rgba(42, 42, 58, 0.2);
 	}
 
 	.rain-empty {
