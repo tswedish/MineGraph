@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "minegraph"
+path = "src/main.rs"
+
 [dependencies]
 minegraph-types = { path = "../minegraph-types" }
 minegraph-graph = { path = "../minegraph-graph" }
