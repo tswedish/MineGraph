@@ -41,11 +41,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: web/package-lock.json
 
       - name: Install dependencies
-        run: cd web && npm ci
+        run: npm install
 
-      - name: Build
-        run: cd web && npm run build
+      - name: Build web app
+        run: npm run build --workspace=web
+
+      - name: Build dashboard app
+        run: npm run build --workspace=dashboard

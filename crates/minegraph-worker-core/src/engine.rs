@@ -9,22 +9,31 @@
 //! - **Batched submissions**: buffer discoveries, drain N per round
 //! - **Backoff on failure**: exponential backoff when rounds produce nothing
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use minegraph_graph::{AdjacencyMatrix, graph6};
+use minegraph_identity::Identity;
 use minegraph_scoring::automorphism::canonical_form;
 use minegraph_scoring::goodman;
 use minegraph_scoring::histogram::CliqueHistogram;
 use minegraph_scoring::score::GraphScore;
 use minegraph_types::GraphCid;
-use minegraph_worker_api::{ProgressInfo, RawDiscovery, SearchJob, SearchObserver, SearchStrategy};
+use minegraph_worker_api::{
+    ConfigParam, ParamType, ProgressInfo, RawDiscovery, SearchJob, SearchObserver, SearchStrategy,
+    WorkerState,
+};
 use rand::{Rng, SeedableRng};
-use tokio::sync::watch;
+use serde::{Deserialize, Serialize};
+use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, error, info, warn};
 
 use crate::client::ServerClient;
+use crate::dashboard::DashboardClient;
+use minegraph_dashboard::protocol::WorkerMessage;
+
+// ── Configuration ─────────────────────────────────────────
 
 /// Configuration for the worker engine.
 #[derive(Clone, Debug)]
@@ -41,6 +50,122 @@ pub struct EngineConfig {
     pub noise_flips: u32,
     pub max_submissions_per_round: usize,
     pub metadata: Option<serde_json::Value>,
+    /// Dashboard relay server URL (e.g. ws://localhost:4000/ws/worker).
+    pub dashboard_url: Option<String>,
+}
+
+// ── Engine command channel types ──────────────────────────
+
+/// Commands sent to the engine from the HTTP API.
+pub enum EngineCommand {
+    Pause,
+    Resume,
+    Stop,
+    GetStatus {
+        reply: oneshot::Sender<EngineSnapshot>,
+    },
+    UpdateConfig {
+        patch: HashMap<String, serde_json::Value>,
+        reply: oneshot::Sender<ConfigUpdateResult>,
+    },
+}
+
+/// Status snapshot of the engine.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EngineSnapshot {
+    pub state: WorkerState,
+    pub round: u64,
+    pub n: u32,
+    pub strategy: String,
+    pub worker_id: String,
+    pub key_id: String,
+    pub config: ConfigSnapshot,
+    pub metrics: EngineMetrics,
+}
+
+/// Current configuration with values and adjustability info.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConfigSnapshot {
+    pub params: Vec<ConfigParamWithValue>,
+}
+
+/// A single config parameter with its current value and metadata.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConfigParamWithValue {
+    pub param: ConfigParam,
+    pub value: serde_json::Value,
+    pub source: String,
+}
+
+/// Result of a config update request.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConfigUpdateResult {
+    pub applied: Vec<String>,
+    pub errors: Vec<(String, String)>,
+    pub effective_round: u64,
+}
+
+/// Engine runtime metrics.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EngineMetrics {
+    pub total_discoveries: u64,
+    pub total_submitted: u64,
+    pub total_admitted: u64,
+    pub submit_buffer_size: usize,
+    pub known_cids_count: usize,
+    pub server_cids_count: usize,
+    pub last_round_ms: u64,
+}
+
+// ── Engine-level config params ────────────────────────────
+
+/// Returns ConfigParam descriptors for engine-level adjustable params.
+pub fn engine_config_params() -> Vec<ConfigParam> {
+    vec![
+        ConfigParam {
+            name: "max_iters".into(),
+            label: "Max Iterations".into(),
+            description: "Iteration budget per search round".into(),
+            param_type: ParamType::Int {
+                min: 100,
+                max: 10_000_000,
+            },
+            default: serde_json::json!(100_000),
+            adjustable: true,
+        },
+        ConfigParam {
+            name: "sample_bias".into(),
+            label: "Sample Bias".into(),
+            description: "Leaderboard seed bias (0=uniform, 1=top-biased)".into(),
+            param_type: ParamType::Float { min: 0.0, max: 1.0 },
+            default: serde_json::json!(0.8),
+            adjustable: true,
+        },
+        ConfigParam {
+            name: "noise_flips".into(),
+            label: "Noise Flips".into(),
+            description: "Random edge flips applied to seed graphs".into(),
+            param_type: ParamType::Int { min: 0, max: 100 },
+            default: serde_json::json!(0),
+            adjustable: true,
+        },
+        ConfigParam {
+            name: "max_submissions_per_round".into(),
+            label: "Max Submissions/Round".into(),
+            description: "Maximum graphs submitted per round (0=unlimited)".into(),
+            param_type: ParamType::Int { min: 0, max: 1000 },
+            default: serde_json::json!(20),
+            adjustable: true,
+        },
+        ConfigParam {
+            name: "n".into(),
+            label: "Vertex Count".into(),
+            description: "Target vertex count (cannot be changed at runtime)".into(),
+            param_type: ParamType::Int { min: 3, max: 100 },
+            default: serde_json::json!(25),
+            adjustable: false,
+        },
+    ]
 }
 
 // ── Scored discovery (locally scored + canonical) ────────────
@@ -79,15 +204,243 @@ impl SearchObserver for CollectingObserver {
     }
 }
 
+// ── Dashboard-aware observer ────────────────────────────────
+
+/// Observer that collects discoveries AND forwards progress to the dashboard.
+/// Progress events are throttled to ~4 Hz to avoid overwhelming the browser.
+struct DashboardObserver {
+    inner: CollectingObserver,
+    dashboard: DashboardClient,
+    last_progress: Mutex<Instant>,
+}
+
+/// Minimum interval between progress messages (250ms = 4 Hz).
+const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+impl DashboardObserver {
+    fn new(dashboard: DashboardClient) -> Self {
+        Self {
+            inner: CollectingObserver::new(),
+            dashboard,
+            last_progress: Mutex::new(Instant::now()),
+        }
+    }
+
+    fn drain(&self) -> Vec<RawDiscovery> {
+        self.inner.drain()
+    }
+}
+
+impl SearchObserver for DashboardObserver {
+    fn on_progress(&self, info: &ProgressInfo) {
+        // Throttle: only send if enough time has passed since last progress
+        let mut last = self.last_progress.lock().unwrap();
+        let now = Instant::now();
+        if now.duration_since(*last) < PROGRESS_INTERVAL {
+            return;
+        }
+        *last = now;
+
+        self.dashboard.send(WorkerMessage::Progress {
+            iteration: info.iteration,
+            max_iters: info.max_iters,
+            violation_score: info.violation_score,
+            current_graph6: graph6::encode(&info.graph),
+            discoveries_so_far: info.discoveries_so_far,
+        });
+    }
+
+    fn on_discovery(&self, discovery: &RawDiscovery) {
+        self.inner.on_discovery(discovery);
+    }
+}
+
+// ── Command handling ──────────────────────────────────────
+
+/// Mutable engine stats passed to build_snapshot.
+struct EngineStats {
+    round: u64,
+    total_discoveries: u64,
+    total_submitted: u64,
+    total_admitted: u64,
+    submit_buffer_size: usize,
+    known_cids_count: usize,
+    server_cids_count: usize,
+    last_round_ms: u64,
+}
+
+fn build_snapshot(
+    state: WorkerState,
+    config: &EngineConfig,
+    strategy: &dyn SearchStrategy,
+    worker_id: &str,
+    key_id: &str,
+    stats: &EngineStats,
+) -> EngineSnapshot {
+    let mut params = Vec::new();
+
+    // Engine-level params
+    for p in engine_config_params() {
+        let value = match p.name.as_str() {
+            "max_iters" => serde_json::json!(config.max_iters),
+            "sample_bias" => serde_json::json!(config.sample_bias),
+            "noise_flips" => serde_json::json!(config.noise_flips),
+            "max_submissions_per_round" => serde_json::json!(config.max_submissions_per_round),
+            "n" => serde_json::json!(config.n),
+            _ => p.default.clone(),
+        };
+        params.push(ConfigParamWithValue {
+            param: p,
+            value,
+            source: "engine".into(),
+        });
+    }
+
+    // Strategy-level params
+    for p in strategy.config_schema() {
+        let value = config
+            .strategy_config
+            .get(&p.name)
+            .cloned()
+            .unwrap_or_else(|| p.default.clone());
+        params.push(ConfigParamWithValue {
+            param: p,
+            value,
+            source: "strategy".into(),
+        });
+    }
+
+    EngineSnapshot {
+        state,
+        round: stats.round,
+        n: config.n,
+        strategy: strategy.id().to_string(),
+        worker_id: worker_id.to_string(),
+        key_id: key_id.to_string(),
+        config: ConfigSnapshot { params },
+        metrics: EngineMetrics {
+            total_discoveries: stats.total_discoveries,
+            total_submitted: stats.total_submitted,
+            total_admitted: stats.total_admitted,
+            submit_buffer_size: stats.submit_buffer_size,
+            known_cids_count: stats.known_cids_count,
+            server_cids_count: stats.server_cids_count,
+            last_round_ms: stats.last_round_ms,
+        },
+    }
+}
+
+/// Validate and apply a config patch. Returns which params were applied and which had errors.
+fn apply_config_patch(
+    config: &mut EngineConfig,
+    strategy: &dyn SearchStrategy,
+    patch: HashMap<String, serde_json::Value>,
+    next_round: u64,
+) -> ConfigUpdateResult {
+    let engine_params = engine_config_params();
+    let strategy_params = strategy.config_schema();
+
+    let mut applied = Vec::new();
+    let mut errors = Vec::new();
+
+    for (name, value) in patch {
+        // Check engine params first
+        if let Some(ep) = engine_params.iter().find(|p| p.name == name) {
+            if !ep.adjustable {
+                errors.push((name, "parameter is not adjustable at runtime".into()));
+                continue;
+            }
+            if let Err(e) = validate_param_value(ep, &value) {
+                errors.push((name, e));
+                continue;
+            }
+            match name.as_str() {
+                "max_iters" => config.max_iters = value.as_u64().unwrap(),
+                "sample_bias" => config.sample_bias = value.as_f64().unwrap(),
+                "noise_flips" => config.noise_flips = value.as_u64().unwrap() as u32,
+                "max_submissions_per_round" => {
+                    config.max_submissions_per_round = value.as_u64().unwrap() as usize
+                }
+                _ => {
+                    errors.push((name, "unknown engine param".into()));
+                    continue;
+                }
+            }
+            applied.push(name);
+            continue;
+        }
+
+        // Check strategy params
+        if let Some(sp) = strategy_params.iter().find(|p| p.name == name) {
+            if !sp.adjustable {
+                errors.push((name, "parameter is not adjustable at runtime".into()));
+                continue;
+            }
+            if let Err(e) = validate_param_value(sp, &value) {
+                errors.push((name, e));
+                continue;
+            }
+            if let Some(obj) = config.strategy_config.as_object_mut() {
+                obj.insert(name.clone(), value);
+            }
+            applied.push(name);
+            continue;
+        }
+
+        errors.push((name, "unknown parameter".into()));
+    }
+
+    ConfigUpdateResult {
+        applied,
+        errors,
+        effective_round: next_round,
+    }
+}
+
+fn validate_param_value(param: &ConfigParam, value: &serde_json::Value) -> Result<(), String> {
+    match &param.param_type {
+        ParamType::Int { min, max } => {
+            let v = value
+                .as_i64()
+                .ok_or_else(|| format!("expected integer, got {value}"))?;
+            if v < *min || v > *max {
+                return Err(format!("value {v} out of range [{min}, {max}]"));
+            }
+        }
+        ParamType::Float { min, max } => {
+            let v = value
+                .as_f64()
+                .ok_or_else(|| format!("expected float, got {value}"))?;
+            if v < *min || v > *max {
+                return Err(format!("value {v} out of range [{min}, {max}]"));
+            }
+        }
+        ParamType::Bool => {
+            if !value.is_boolean() {
+                return Err(format!("expected boolean, got {value}"));
+            }
+        }
+    }
+    Ok(())
+}
+
 // ── Engine loop ─────────────────────────────────────────────
 
 /// Run the engine loop. Blocks until shutdown signal.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_engine(
     config: EngineConfig,
     strategies: Vec<Arc<dyn SearchStrategy>>,
     client: Option<ServerClient>,
-    shutdown: watch::Receiver<bool>,
+    identity: Option<Arc<Identity>>,
+    mut shutdown: watch::Receiver<bool>,
+    cmd_rx: Option<mpsc::Receiver<EngineCommand>>,
+    snapshot_tx: Option<watch::Sender<EngineSnapshot>>,
+    api_addr: Option<String>,
 ) {
+    let mut config = config;
+    let mut cmd_rx = cmd_rx;
+
     let strategy = strategies
         .iter()
         .find(|s| s.id() == config.strategy_id)
@@ -106,36 +459,7 @@ pub async fn run_engine(
         .and_then(|v| v.as_u64())
         .unwrap_or(5) as u32;
 
-    info!(
-        n = config.n,
-        strategy = strategy.id(),
-        server = %config.server_url,
-        offline = config.offline,
-        "engine starting"
-    );
-
-    let mut known_cids: HashSet<GraphCid> = HashSet::new(); // CIDs in submit buffer or already submitted
-    let mut server_cids: HashSet<GraphCid> = HashSet::new(); // CIDs confirmed on server
-    let mut server_graphs: Vec<String> = Vec::new();
-    let mut submit_buffer: Vec<ScoredDiscovery> = Vec::new();
-    let mut round: u64 = 0;
-    let mut total_discoveries: u64 = 0;
-    let mut total_submitted: u64 = 0;
-    let mut total_admitted: u64 = 0;
-    let mut total_skipped_threshold: u64 = 0;
-    let mut total_skipped_dup: u64 = 0;
-    let mut total_skipped_server: u64 = 0;
-    let mut cid_sync_cursor: Option<String> = None;
-    let mut threshold_score_bytes: Option<Vec<u8>> = None;
-    let mut leaderboard_full: bool = false;
-    let mut current_best_g6: Option<String> = None;
-    let mut current_violation_score: u32 = 0;
-    let mut current_goodman_gap: Option<f64> = None;
-    let mut current_aut_order: Option<f64> = None;
-    let mut rng = rand::rngs::SmallRng::from_entropy();
-    let start_time = Instant::now();
-
-    // Extract worker_id from metadata for heartbeat labeling, fall back to a default
+    // Extract worker_id from metadata
     let worker_id = config
         .metadata
         .as_ref()
@@ -145,11 +469,67 @@ pub async fn run_engine(
         .to_string();
 
     let key_id = client.as_ref().and_then(|c| c.key_id()).unwrap_or_default();
-    let batch_size = if config.max_submissions_per_round > 0 {
-        config.max_submissions_per_round
-    } else {
-        20
+
+    // Connect to dashboard relay if configured
+    let dashboard = config.dashboard_url.as_ref().map(|url| {
+        info!(url, "connecting to dashboard relay");
+        DashboardClient::connect(
+            url.clone(),
+            identity.clone(),
+            worker_id.clone(),
+            config.n,
+            strategy.id().to_string(),
+            config.metadata.clone(),
+            api_addr,
+            shutdown.clone(),
+        )
+    });
+
+    info!(
+        n = config.n,
+        strategy = strategy.id(),
+        server = %config.server_url,
+        offline = config.offline,
+        dashboard = config.dashboard_url.as_deref().unwrap_or("none"),
+        "engine starting"
+    );
+
+    let mut engine_state = WorkerState::Searching;
+    let mut known_cids: HashSet<GraphCid> = HashSet::new();
+    let mut server_cids: HashSet<GraphCid> = HashSet::new();
+    let mut dash_sent_cids: HashSet<GraphCid> = HashSet::new();
+    let mut server_graphs: Vec<String> = Vec::new();
+    let mut submit_buffer: Vec<ScoredDiscovery> = Vec::new();
+    let mut total_skipped_threshold: u64 = 0;
+    let mut total_skipped_dup: u64 = 0;
+    let mut total_skipped_server: u64 = 0;
+    let mut cid_sync_cursor: Option<String> = None;
+    let mut threshold_score_bytes: Option<Vec<u8>> = None;
+    let mut leaderboard_full: bool = false;
+    let mut rng = rand::rngs::SmallRng::from_entropy();
+
+    let mut stats = EngineStats {
+        round: 0,
+        total_discoveries: 0,
+        total_submitted: 0,
+        total_admitted: 0,
+        submit_buffer_size: 0,
+        known_cids_count: 0,
+        server_cids_count: 0,
+        last_round_ms: 0,
     };
+
+    // Send initial snapshot
+    if let Some(ref tx) = snapshot_tx {
+        let _ = tx.send(build_snapshot(
+            engine_state.clone(),
+            &config,
+            strategy.as_ref(),
+            &worker_id,
+            &key_id,
+            &stats,
+        ));
+    }
 
     loop {
         if *shutdown.borrow() {
@@ -157,7 +537,134 @@ pub async fn run_engine(
             break;
         }
 
-        round += 1;
+        // ── Process pending commands ──────────────────────
+        if let Some(ref mut rx) = cmd_rx {
+            while let Ok(cmd) = rx.try_recv() {
+                match cmd {
+                    EngineCommand::Pause => {
+                        engine_state = WorkerState::Paused;
+                        info!("engine paused (will take effect before next round)");
+                    }
+                    EngineCommand::Resume => {
+                        engine_state = WorkerState::Searching;
+                        info!("engine resumed");
+                    }
+                    EngineCommand::Stop => {
+                        info!("stop command received");
+                        engine_state = WorkerState::Idle;
+                    }
+                    EngineCommand::GetStatus { reply } => {
+                        stats.submit_buffer_size = submit_buffer.len();
+                        stats.known_cids_count = known_cids.len();
+                        stats.server_cids_count = server_cids.len();
+                        let snap = build_snapshot(
+                            engine_state.clone(),
+                            &config,
+                            strategy.as_ref(),
+                            &worker_id,
+                            &key_id,
+                            &stats,
+                        );
+                        let _ = reply.send(snap);
+                    }
+                    EngineCommand::UpdateConfig { patch, reply } => {
+                        let result = apply_config_patch(
+                            &mut config,
+                            strategy.as_ref(),
+                            patch,
+                            stats.round + 1,
+                        );
+                        if !result.applied.is_empty() {
+                            info!(applied = ?result.applied, "config updated");
+                        }
+                        let _ = reply.send(result);
+                    }
+                }
+            }
+        }
+
+        // ── Handle paused state ──────────────────────────
+        if engine_state == WorkerState::Paused {
+            if let Some(ref mut rx) = cmd_rx {
+                // Update snapshot to reflect paused state
+                if let Some(ref tx) = snapshot_tx {
+                    stats.submit_buffer_size = submit_buffer.len();
+                    stats.known_cids_count = known_cids.len();
+                    stats.server_cids_count = server_cids.len();
+                    let _ = tx.send(build_snapshot(
+                        engine_state.clone(),
+                        &config,
+                        strategy.as_ref(),
+                        &worker_id,
+                        &key_id,
+                        &stats,
+                    ));
+                }
+
+                loop {
+                    tokio::select! {
+                        Some(cmd) = rx.recv() => {
+                            match cmd {
+                                EngineCommand::Resume => {
+                                    engine_state = WorkerState::Searching;
+                                    info!("engine resumed");
+                                    break;
+                                }
+                                EngineCommand::Stop => {
+                                    info!("stop command received while paused");
+                                    engine_state = WorkerState::Idle;
+                                    break;
+                                }
+                                EngineCommand::GetStatus { reply } => {
+                                    stats.submit_buffer_size = submit_buffer.len();
+                                    stats.known_cids_count = known_cids.len();
+                                    stats.server_cids_count = server_cids.len();
+                                    let snap = build_snapshot(
+                                        engine_state.clone(),
+                                        &config,
+                                        strategy.as_ref(),
+                                        &worker_id,
+                                        &key_id,
+                                        &stats,
+                                    );
+                                    let _ = reply.send(snap);
+                                }
+                                EngineCommand::UpdateConfig { patch, reply } => {
+                                    let result = apply_config_patch(
+                                        &mut config,
+                                        strategy.as_ref(),
+                                        patch,
+                                        stats.round + 1,
+                                    );
+                                    if !result.applied.is_empty() {
+                                        info!(applied = ?result.applied, "config updated while paused");
+                                    }
+                                    let _ = reply.send(result);
+                                }
+                                EngineCommand::Pause => {} // already paused
+                            }
+                        }
+                        _ = shutdown.changed() => {
+                            if *shutdown.borrow() {
+                                info!("shutdown signal while paused");
+                                engine_state = WorkerState::Idle;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // No command channel — can't unpause, just stop
+                info!("paused without command channel, stopping");
+                break;
+            }
+        }
+
+        if engine_state == WorkerState::Idle {
+            break;
+        }
+
+        stats.round += 1;
         let round_start = Instant::now();
 
         // ── Server sync ─────────────────────────────────────
@@ -206,7 +713,7 @@ pub async fn run_engine(
             }
 
             // 3. Fetch seed graphs (every 10 rounds)
-            if round == 1 || round.is_multiple_of(10) {
+            if stats.round == 1 || stats.round.is_multiple_of(10) {
                 match client
                     .get_graphs(config.n, config.leaderboard_sample_size, 0)
                     .await
@@ -243,25 +750,53 @@ pub async fn run_engine(
             carry_state: None,
         };
 
-        // ── Run search ──────────────────────────────────────
-        let strategy_clone = strategy.clone();
-        let observer = Arc::new(CollectingObserver::new());
-        let observer_clone = observer.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            strategy_clone.search(&job, observer_clone.as_ref())
-        })
-        .await;
-
-        let result = match result {
-            Ok(r) => r,
-            Err(e) => {
-                error!("search task panicked: {e}");
-                continue;
-            }
+        // Recompute batch size in case config changed
+        let batch_size = if config.max_submissions_per_round > 0 {
+            config.max_submissions_per_round
+        } else {
+            20
         };
 
+        // ── Run search ──────────────────────────────────────
+        let strategy_clone = strategy.clone();
+
+        let raw_discoveries: Vec<RawDiscovery>;
+        let result;
+
+        if let Some(ref dash) = dashboard {
+            let observer = Arc::new(DashboardObserver::new(dash.clone()));
+            let observer_clone = observer.clone();
+            let r = tokio::task::spawn_blocking(move || {
+                strategy_clone.search(&job, observer_clone.as_ref())
+            })
+            .await;
+            result = match r {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("search task panicked: {e}");
+                    continue;
+                }
+            };
+            raw_discoveries = observer.drain();
+        } else {
+            let observer = Arc::new(CollectingObserver::new());
+            let observer_clone = observer.clone();
+            let r = tokio::task::spawn_blocking(move || {
+                strategy_clone.search(&job, observer_clone.as_ref())
+            })
+            .await;
+            result = match r {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("search task panicked: {e}");
+                    continue;
+                }
+            };
+            raw_discoveries = observer.drain();
+        }
+
         // ── Collect + score + dedup discoveries ─────────────
-        let mut raw_discoveries: Vec<RawDiscovery> = observer.drain();
+        let mut raw_discoveries = raw_discoveries;
         if let Some(ref best) = result.best_graph
             && result.valid
         {
@@ -276,23 +811,14 @@ pub async fn run_engine(
         let mut round_skipped_dup: u64 = 0;
         let mut round_skipped_server: u64 = 0;
         let mut round_skipped_threshold: u64 = 0;
+        let mut dash_discoveries_sent: usize = 0;
+        const MAX_DASH_DISCOVERIES_PER_ROUND: usize = 20;
+
         for discovery in &raw_discoveries {
             // Canonical form + aut_order
             let (canonical, aut_order) = canonical_form(&discovery.graph);
             let canonical_g6 = graph6::encode(&canonical);
             let cid = minegraph_graph::compute_cid(&canonical);
-
-            // Dedup: skip if already in our submit pipeline or previously submitted
-            if known_cids.contains(&cid) {
-                round_skipped_dup += 1;
-                continue;
-            }
-
-            // Skip if server already has it
-            if server_cids.contains(&cid) {
-                round_skipped_server += 1;
-                continue;
-            }
 
             // Score locally
             let histogram = CliqueHistogram::compute(&discovery.graph, max_k);
@@ -300,6 +826,40 @@ pub async fn run_engine(
             let gap = goodman::goodman_gap(config.n, red_tri, blue_tri);
             let score = GraphScore::new(histogram, gap, aut_order, cid);
             let score_bytes = score.to_score_bytes(max_k);
+
+            // Send unique scored discoveries to dashboard (capped per round)
+            if let Some(ref dash) = dashboard
+                && !dash_sent_cids.contains(&cid)
+                && dash_discoveries_sent < MAX_DASH_DISCOVERIES_PER_ROUND
+            {
+                dash_sent_cids.insert(cid);
+                dash_discoveries_sent += 1;
+                dash.send(WorkerMessage::Discovery {
+                    graph6: canonical_g6.clone(),
+                    cid: cid.to_hex(),
+                    goodman_gap: gap as f64,
+                    aut_order,
+                    score_hex: hex::encode(&score_bytes),
+                    histogram: score
+                        .histogram
+                        .tiers
+                        .iter()
+                        .map(|t| (t.k, t.red, t.blue))
+                        .collect(),
+                    iteration: discovery.iteration,
+                });
+            }
+
+            // Dedup for server submission pipeline
+            if known_cids.contains(&cid) {
+                round_skipped_dup += 1;
+                continue;
+            }
+
+            if server_cids.contains(&cid) {
+                round_skipped_server += 1;
+                continue;
+            }
 
             // Threshold gate: ONLY when leaderboard is full
             if leaderboard_full
@@ -310,8 +870,9 @@ pub async fn run_engine(
                 continue;
             }
 
-            // Passed all filters — mark as known and queue for submission
+            // Passed submission filters — mark as known and queue
             known_cids.insert(cid);
+
             new_scored.push(ScoredDiscovery {
                 graph: discovery.graph.clone(),
                 canonical_graph6: canonical_g6,
@@ -321,27 +882,14 @@ pub async fn run_engine(
         }
 
         let new_unique = new_scored.len();
-        total_discoveries += new_unique as u64;
+        stats.total_discoveries += new_unique as u64;
         total_skipped_dup += round_skipped_dup;
         total_skipped_server += round_skipped_server;
         total_skipped_threshold += round_skipped_threshold;
 
-        // Update current best for heartbeat visualization
-        if let Some(ref best) = result.best_graph {
-            current_best_g6 = Some(graph6::encode(best));
-            // Use the first scored discovery's data if available, else basic info
-            if let Some(scored) = new_scored.first() {
-                current_goodman_gap = Some(scored.score.goodman_gap as f64);
-                current_aut_order = Some(scored.score.aut_order);
-                current_violation_score = 0; // scored discoveries are valid
-            }
-        }
-        if !result.valid {
-            current_violation_score = 1; // non-zero indicates not valid
-        }
-
-        // Add to submit buffer
+        // Add to submit buffer and sort by score (best first)
         submit_buffer.extend(new_scored);
+        submit_buffer.sort_by(|a, b| a.score.cmp(&b.score));
 
         // ── Submit a batch from the buffer ──────────────────
         let mut round_submitted = 0u64;
@@ -381,14 +929,14 @@ pub async fn run_engine(
             }
         }
 
-        total_submitted += round_submitted;
-        total_admitted += round_admitted;
+        stats.total_submitted += round_submitted;
+        stats.total_admitted += round_admitted;
 
         let round_elapsed = round_start.elapsed();
-        let round_ms = round_elapsed.as_millis() as u64;
+        stats.last_round_ms = round_elapsed.as_millis() as u64;
 
         info!(
-            round,
+            round = stats.round,
             iters = result.iterations_used,
             new_unique,
             skip_dup = round_skipped_dup,
@@ -399,40 +947,37 @@ pub async fn run_engine(
             buffered = submit_buffer.len(),
             full = leaderboard_full,
             valid = result.valid,
-            ms = round_ms,
-            total_discoveries,
-            total_admitted,
+            ms = stats.last_round_ms,
+            stats.total_discoveries,
+            stats.total_admitted,
             "round complete"
         );
 
-        // ── Heartbeat (every 5 rounds) ──────────────────────
-        if !config.offline
-            && round.is_multiple_of(5)
-            && let Some(ref client) = client
-        {
-            let heartbeat = serde_json::json!({
-                "worker_id": worker_id,
-                "key_id": key_id,
-                "strategy": strategy.id(),
-                "metadata": config.metadata,
-                "n": config.n,
-                "stats": {
-                    "round": round,
-                    "total_discoveries": total_discoveries,
-                    "total_submitted": total_submitted,
-                    "total_admitted": total_admitted,
-                    "buffered": submit_buffer.len(),
-                    "last_round_ms": round_ms,
-                    "new_unique_last_round": new_unique,
-                    "uptime_secs": start_time.elapsed().as_secs(),
-                    "current_graph6": current_best_g6,
-                    "violation_score": current_violation_score,
-                    "goodman_gap": current_goodman_gap,
-                    "aut_order": current_aut_order,
-                },
-                "last_seen": chrono::Utc::now().to_rfc3339(),
+        // Send round summary to dashboard
+        if let Some(ref dash) = dashboard {
+            dash.send(WorkerMessage::RoundComplete {
+                round: stats.round,
+                duration_ms: stats.last_round_ms,
+                discoveries: new_unique as u64,
+                submitted: round_submitted,
+                admitted: round_admitted,
+                buffered: submit_buffer.len(),
             });
-            client.heartbeat(&heartbeat).await;
+        }
+
+        // Update snapshot
+        stats.submit_buffer_size = submit_buffer.len();
+        stats.known_cids_count = known_cids.len();
+        stats.server_cids_count = server_cids.len();
+        if let Some(ref tx) = snapshot_tx {
+            let _ = tx.send(build_snapshot(
+                engine_state.clone(),
+                &config,
+                strategy.as_ref(),
+                &worker_id,
+                &key_id,
+                &stats,
+            ));
         }
 
         // Trim known CIDs
@@ -466,10 +1011,10 @@ pub async fn run_engine(
     }
 
     info!(
-        rounds = round,
-        total_discoveries,
-        total_submitted,
-        total_admitted,
+        rounds = stats.round,
+        stats.total_discoveries,
+        stats.total_submitted,
+        stats.total_admitted,
         total_skipped_dup,
         total_skipped_server,
         total_skipped_threshold,

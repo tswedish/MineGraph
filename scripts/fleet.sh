@@ -13,6 +13,8 @@ MAX_DEPTH=12
 SAMPLE_BIAS=0.8
 MAX_ITERS=100000
 SERVER="http://localhost:3001"
+DASHBOARD=""
+API_PORT_BASE=0
 RELEASE=""
 LOG_DIR="logs/fleet-$(date +%Y%m%d-%H%M%S)"
 
@@ -27,6 +29,8 @@ while [[ $# -gt 0 ]]; do
         --sample-bias) SAMPLE_BIAS=$2; shift 2 ;;
         --max-iters) MAX_ITERS=$2; shift 2 ;;
         --server) SERVER=$2; shift 2 ;;
+        --dashboard) DASHBOARD=$2; shift 2 ;;
+        --api-port-base) API_PORT_BASE=$2; shift 2 ;;
         --release) RELEASE="--release"; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
@@ -40,6 +44,8 @@ echo "Target:      n=$N, R($TARGET_K,$TARGET_ELL)"
 echo "Beam:        width=$BEAM_WIDTH depth=$MAX_DEPTH bias=$SAMPLE_BIAS"
 echo "Max iters:   $MAX_ITERS"
 echo "Server:      $SERVER"
+echo "Dashboard:   ${DASHBOARD:-none}"
+echo "API ports:   ${API_PORT_BASE:-auto}"
 echo "Logs:        $LOG_DIR"
 echo "========================"
 
@@ -92,6 +98,14 @@ echo "Commit:      $COMMIT_HASH"
 for i in $(seq 1 "$WORKERS"); do
     LOG_FILE="$LOG_DIR/worker-$i.log"
     echo "Starting worker $i -> $LOG_FILE"
+    DASH_FLAG=""
+    if [[ -n "$DASHBOARD" ]]; then
+        DASH_FLAG="--dashboard $DASHBOARD"
+    fi
+    API_PORT_FLAG=""
+    if [[ "$API_PORT_BASE" -gt 0 ]]; then
+        API_PORT_FLAG="--api-port $((API_PORT_BASE + i - 1))"
+    fi
     NO_COLOR=1 RUST_LOG=info "$WORKER_BIN" \
         --server "$SERVER" \
         --n "$N" \
@@ -101,7 +115,9 @@ for i in $(seq 1 "$WORKERS"); do
         --max-depth "$MAX_DEPTH" \
         --sample-bias "$SAMPLE_BIAS" \
         --max-iters "$MAX_ITERS" \
-        --metadata "{\"worker_id\":\"fleet-$i\",\"commit_hash\":\"$COMMIT_HASH\"}" \
+        --metadata "{\"worker_id\":\"fleet-$i\",\"commit_hash\":\"$COMMIT_HASH\",\"strategy\":\"tree2\",\"beam_width\":$BEAM_WIDTH,\"max_depth\":$MAX_DEPTH,\"sample_bias\":$SAMPLE_BIAS,\"noise_flips\":0}" \
+        $DASH_FLAG \
+        $API_PORT_FLAG \
         > "$LOG_FILE" 2>&1 &
     PIDS+=($!)
 done
