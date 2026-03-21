@@ -11,10 +11,14 @@ use minegraph_dashboard::protocol::WorkerMessage;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+/// Max queued messages before dropping. Keeps the buffer from growing unbounded
+/// during bursts of discoveries.
+const MAX_QUEUED_MESSAGES: usize = 64;
+
 /// Dashboard client that maintains a WebSocket connection to the relay server.
 #[derive(Clone)]
 pub struct DashboardClient {
-    tx: mpsc::UnboundedSender<WorkerMessage>,
+    tx: mpsc::Sender<WorkerMessage>,
     connected: Arc<AtomicBool>,
 }
 
@@ -26,7 +30,7 @@ impl DashboardClient {
         register_msg: WorkerMessage,
         shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(MAX_QUEUED_MESSAGES);
         let connected = Arc::new(AtomicBool::new(false));
         let connected_clone = connected.clone();
 
@@ -37,10 +41,11 @@ impl DashboardClient {
         Self { tx, connected }
     }
 
-    /// Send a message to the dashboard. Non-blocking, drops if disconnected.
+    /// Send a message to the dashboard. Non-blocking, drops if buffer full or disconnected.
     pub fn send(&self, msg: WorkerMessage) {
         if self.connected.load(Ordering::Relaxed) {
-            let _ = self.tx.send(msg);
+            // try_send: drops the message if the channel is full rather than blocking
+            let _ = self.tx.try_send(msg);
         }
     }
 
@@ -53,7 +58,7 @@ impl DashboardClient {
 async fn run_connection(
     url: String,
     register_msg: WorkerMessage,
-    mut rx: mpsc::UnboundedReceiver<WorkerMessage>,
+    mut rx: mpsc::Receiver<WorkerMessage>,
     connected: Arc<AtomicBool>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {

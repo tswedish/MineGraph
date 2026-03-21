@@ -3,7 +3,7 @@
 
 	let {
 		graph6,
-		n,
+		n: _n,
 		size = 60,
 		cid = '',
 		goodmanGap = 0,

@@ -86,16 +86,22 @@ impl SearchObserver for CollectingObserver {
 // ── Dashboard-aware observer ────────────────────────────────
 
 /// Observer that collects discoveries AND forwards progress to the dashboard.
+/// Progress events are throttled to ~4 Hz to avoid overwhelming the browser.
 struct DashboardObserver {
     inner: CollectingObserver,
     dashboard: DashboardClient,
+    last_progress: Mutex<Instant>,
 }
+
+/// Minimum interval between progress messages (250ms = 4 Hz).
+const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
 impl DashboardObserver {
     fn new(dashboard: DashboardClient) -> Self {
         Self {
             inner: CollectingObserver::new(),
             dashboard,
+            last_progress: Mutex::new(Instant::now()),
         }
     }
 
@@ -106,6 +112,14 @@ impl DashboardObserver {
 
 impl SearchObserver for DashboardObserver {
     fn on_progress(&self, info: &ProgressInfo) {
+        // Throttle: only send if enough time has passed since last progress
+        let mut last = self.last_progress.lock().unwrap();
+        let now = Instant::now();
+        if now.duration_since(*last) < PROGRESS_INTERVAL {
+            return;
+        }
+        *last = now;
+
         self.dashboard.send(WorkerMessage::Progress {
             iteration: info.iteration,
             max_iters: info.max_iters,
@@ -117,7 +131,6 @@ impl SearchObserver for DashboardObserver {
 
     fn on_discovery(&self, discovery: &RawDiscovery) {
         self.inner.on_discovery(discovery);
-        // Note: full scored discovery is sent after scoring in the round loop
     }
 }
 
@@ -353,6 +366,8 @@ pub async fn run_engine(
         let mut round_skipped_server: u64 = 0;
         let mut round_skipped_threshold: u64 = 0;
         let mut local_pool_cids: HashSet<GraphCid> = HashSet::new();
+        let mut dash_discoveries_sent: usize = 0;
+        const MAX_DASH_DISCOVERIES_PER_ROUND: usize = 20;
 
         for discovery in &raw_discoveries {
             // Canonical form + aut_order
@@ -360,19 +375,20 @@ pub async fn run_engine(
             let canonical_g6 = graph6::encode(&canonical);
             let cid = minegraph_graph::compute_cid(&canonical);
 
-            // Score locally (always, even for dupes — dashboard wants all unique discoveries)
+            // Score locally
             let histogram = CliqueHistogram::compute(&discovery.graph, max_k);
             let (red_tri, blue_tri) = histogram.tier(3).map(|t| (t.red, t.blue)).unwrap_or((0, 0));
             let gap = goodman::goodman_gap(config.n, red_tri, blue_tri);
             let score = GraphScore::new(histogram, gap, aut_order, cid);
             let score_bytes = score.to_score_bytes(max_k);
 
-            // Send ALL unique scored discoveries to dashboard (for local pool visualization)
-            // This feeds the rain column regardless of server dedup/threshold
+            // Send unique scored discoveries to dashboard (capped per round)
             if let Some(ref dash) = dashboard
                 && !local_pool_cids.contains(&cid)
+                && dash_discoveries_sent < MAX_DASH_DISCOVERIES_PER_ROUND
             {
                 local_pool_cids.insert(cid);
+                dash_discoveries_sent += 1;
                 dash.send(WorkerMessage::Discovery {
                     graph6: canonical_g6.clone(),
                     cid: cid.to_hex(),

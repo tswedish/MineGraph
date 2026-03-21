@@ -89,6 +89,8 @@ class DashboardStore {
 	private ws: WebSocket | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private backoffMs = 1000;
+	private pendingEvents: UiEvent[] = [];
+	private flushScheduled = false;
 
 	connect(url?: string) {
 		if (url) this.serverUrl = url;
@@ -147,7 +149,8 @@ class DashboardStore {
 		this.ws.onmessage = (e) => {
 			try {
 				const event: UiEvent = JSON.parse(e.data);
-				this.handleEvent(event);
+				this.pendingEvents.push(event);
+				this.scheduleFlush();
 			} catch { /* ignore parse errors */ }
 		};
 	}
@@ -161,63 +164,77 @@ class DashboardStore {
 		}, this.backoffMs);
 	}
 
-	private handleEvent(event: UiEvent) {
-		switch (event.type) {
-			case 'WorkerConnected': {
-				const state: WorkerState = {
-					workerId: event.worker_id,
-					keyId: event.key_id ?? '',
-					n: event.n ?? 0,
-					strategy: event.strategy ?? '',
-					metadata: event.metadata ?? null,
-					connected: true,
-					iteration: 0,
-					maxIters: 0,
-					violationScore: 0,
-					currentGraph6: '',
-					discoveriesSoFar: 0,
-					round: 0,
-					lastRoundMs: 0,
-					totalSubmitted: 0,
-					totalAdmitted: 0,
-					buffered: 0,
-					bestGems: [],
-				};
-				const newMap = new Map(this.workers);
-				newMap.set(event.worker_id, state);
-				this.workers = newMap;
-				if (!this.columnOrder.includes(event.worker_id)) {
-					this.columnOrder = [...this.columnOrder, event.worker_id];
-				}
-				break;
-			}
-			case 'WorkerDisconnected': {
-				const w = this.workers.get(event.worker_id);
-				if (w) {
-					const newMap = new Map(this.workers);
-					newMap.set(event.worker_id, { ...w, connected: false });
-					this.workers = newMap;
-				}
-				break;
-			}
-			case 'WorkerEvent': {
-				if (event.event) {
-					this.handleWorkerMessage(event.worker_id, event.event);
-				}
-				break;
-			}
-		}
+	private scheduleFlush() {
+		if (this.flushScheduled) return;
+		this.flushScheduled = true;
+		requestAnimationFrame(() => {
+			this.flushScheduled = false;
+			this.flushEvents();
+		});
 	}
 
-	private handleWorkerMessage(workerId: string, msg: WorkerMessage) {
-		const w = this.workers.get(workerId);
-		if (!w) return;
+	private flushEvents() {
+		const events = this.pendingEvents;
+		this.pendingEvents = [];
+		if (events.length === 0) return;
 
-		const newMap = new Map(this.workers);
+		// Mutate a single map copy, assign once at the end
+		const map = new Map(this.workers);
+		let columnOrderChanged = false;
+
+		for (const event of events) {
+			switch (event.type) {
+				case 'WorkerConnected': {
+					map.set(event.worker_id, {
+						workerId: event.worker_id,
+						keyId: event.key_id ?? '',
+						n: event.n ?? 0,
+						strategy: event.strategy ?? '',
+						metadata: event.metadata ?? null,
+						connected: true,
+						iteration: 0,
+						maxIters: 0,
+						violationScore: 0,
+						currentGraph6: '',
+						discoveriesSoFar: 0,
+						round: 0,
+						lastRoundMs: 0,
+						totalSubmitted: 0,
+						totalAdmitted: 0,
+						buffered: 0,
+						bestGems: [],
+					});
+					if (!this.columnOrder.includes(event.worker_id)) {
+						this.columnOrder = [...this.columnOrder, event.worker_id];
+						columnOrderChanged = true;
+					}
+					break;
+				}
+				case 'WorkerDisconnected': {
+					const w = map.get(event.worker_id);
+					if (w) map.set(event.worker_id, { ...w, connected: false });
+					break;
+				}
+				case 'WorkerEvent': {
+					if (event.event) {
+						this.applyWorkerMessage(map, event.worker_id, event.event);
+					}
+					break;
+				}
+			}
+		}
+
+		// Single reactive assignment
+		this.workers = map;
+	}
+
+	private applyWorkerMessage(map: Map<string, WorkerState>, workerId: string, msg: WorkerMessage) {
+		const w = map.get(workerId);
+		if (!w) return;
 
 		switch (msg.type) {
 			case 'Progress': {
-				newMap.set(workerId, {
+				map.set(workerId, {
 					...w,
 					iteration: msg.iteration ?? w.iteration,
 					maxIters: msg.max_iters ?? w.maxIters,
@@ -249,14 +266,11 @@ class DashboardStore {
 				} else {
 					gems.splice(insertIdx, 0, gem);
 				}
-				// Cap at max
-				const trimmed = gems.slice(0, this.maxGemsPerColumn);
-
-				newMap.set(workerId, { ...w, bestGems: trimmed });
+				map.set(workerId, { ...w, bestGems: gems.slice(0, this.maxGemsPerColumn) });
 				break;
 			}
 			case 'RoundComplete': {
-				newMap.set(workerId, {
+				map.set(workerId, {
 					...w,
 					round: msg.round ?? w.round,
 					lastRoundMs: msg.duration_ms ?? w.lastRoundMs,
@@ -267,8 +281,6 @@ class DashboardStore {
 				break;
 			}
 		}
-
-		this.workers = newMap;
 	}
 
 	// Persistence

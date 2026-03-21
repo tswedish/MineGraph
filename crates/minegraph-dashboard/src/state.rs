@@ -32,7 +32,7 @@ pub struct DashboardState {
 
 impl DashboardState {
     pub fn new(max_workers: usize, allowed_keys: HashSet<String>) -> Self {
-        let (ui_tx, _) = broadcast::channel(1024);
+        let (ui_tx, _) = broadcast::channel(256);
         Self {
             ui_tx,
             workers: Arc::new(Mutex::new(HashMap::new())),
