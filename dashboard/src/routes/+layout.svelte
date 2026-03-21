@@ -1,12 +1,15 @@
 <script lang="ts">
 	import '../app.css';
+	import { untrack } from 'svelte';
 	import { store } from '$lib/dashboard-store.svelte';
 
 	let { children } = $props();
 
 	$effect(() => {
-		store.loadSettings();
-		store.connect();
+		untrack(() => {
+			store.loadSettings();
+			store.connect();
+		});
 		return () => store.disconnect();
 	});
 </script>

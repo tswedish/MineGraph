@@ -26,19 +26,13 @@
 	const totalDiscoveries = $derived(workerList.reduce((s, w) => s + w.discoveriesSoFar, 0));
 	const totalAdmitted = $derived(workerList.reduce((s, w) => s + w.totalAdmitted, 0));
 
-	// ── Rain: opacity decay ─────────────────────────────
+	// ── Rain: opacity decay (1 Hz tick, not 60 Hz) ─────
 	let now = $state(Date.now());
 
 	$effect(() => {
 		if (store.mode !== 'rain') return;
-		let running = true;
-		function tick() {
-			if (!running) return;
-			now = Date.now();
-			requestAnimationFrame(tick);
-		}
-		requestAnimationFrame(tick);
-		return () => { running = false; };
+		const interval = setInterval(() => { now = Date.now(); }, 1000);
+		return () => clearInterval(interval);
 	});
 
 	function gemOpacity(gem: RainGemData): number {
@@ -47,9 +41,8 @@
 	}
 </script>
 
-{#if store.mode === 'monitor'}
-	<!-- ═══ MONITOR MODE ═══ -->
-	<div class="monitor">
+<!-- Both views always exist in DOM; CSS toggles visibility for instant switching -->
+<div class="monitor" class:hidden={store.mode !== 'monitor'}>
 		<!-- Connection panel toggle -->
 		<div class="conn-bar">
 			<button class="conn-toggle" onclick={() => showConnPanel = !showConnPanel}>
@@ -132,9 +125,7 @@
 		{/if}
 	</div>
 
-{:else}
-	<!-- ═══ RAIN MODE ═══ -->
-	<div class="rain">
+<div class="rain" class:hidden={store.mode !== 'rain'}>
 		<!-- Controls overlay -->
 		{#if store.showInfo}
 			<div class="rain-controls">
@@ -213,7 +204,6 @@
 		<div class="fade-top"></div>
 		<div class="fade-bottom"></div>
 	</div>
-{/if}
 
 <!-- Popup -->
 {#if popupGem}
@@ -232,6 +222,8 @@
 {/if}
 
 <style>
+	.hidden { display: none !important; }
+
 	/* ── Monitor ────────────────────────────────────── */
 	.monitor { padding-top: 0.5rem; }
 

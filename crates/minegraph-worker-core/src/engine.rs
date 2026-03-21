@@ -199,6 +199,7 @@ pub async fn run_engine(
 
     let mut known_cids: HashSet<GraphCid> = HashSet::new(); // CIDs in submit buffer or already submitted
     let mut server_cids: HashSet<GraphCid> = HashSet::new(); // CIDs confirmed on server
+    let mut dash_sent_cids: HashSet<GraphCid> = HashSet::new(); // CIDs already sent to dashboard
     let mut server_graphs: Vec<String> = Vec::new();
     let mut submit_buffer: Vec<ScoredDiscovery> = Vec::new();
     let mut round: u64 = 0;
@@ -365,7 +366,6 @@ pub async fn run_engine(
         let mut round_skipped_dup: u64 = 0;
         let mut round_skipped_server: u64 = 0;
         let mut round_skipped_threshold: u64 = 0;
-        let mut local_pool_cids: HashSet<GraphCid> = HashSet::new();
         let mut dash_discoveries_sent: usize = 0;
         const MAX_DASH_DISCOVERIES_PER_ROUND: usize = 20;
 
@@ -384,10 +384,10 @@ pub async fn run_engine(
 
             // Send unique scored discoveries to dashboard (capped per round)
             if let Some(ref dash) = dashboard
-                && !local_pool_cids.contains(&cid)
+                && !dash_sent_cids.contains(&cid)
                 && dash_discoveries_sent < MAX_DASH_DISCOVERIES_PER_ROUND
             {
-                local_pool_cids.insert(cid);
+                dash_sent_cids.insert(cid);
                 dash_discoveries_sent += 1;
                 dash.send(WorkerMessage::Discovery {
                     graph6: canonical_g6.clone(),

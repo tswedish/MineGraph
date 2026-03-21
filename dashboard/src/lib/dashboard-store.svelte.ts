@@ -90,7 +90,7 @@ class DashboardStore {
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private backoffMs = 1000;
 	private pendingEvents: UiEvent[] = [];
-	private flushScheduled = false;
+	private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 	connect(url?: string) {
 		if (url) this.serverUrl = url;
@@ -102,6 +102,11 @@ class DashboardStore {
 			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
+		if (this.flushTimer) {
+			clearTimeout(this.flushTimer);
+			this.flushTimer = null;
+		}
+		this.pendingEvents = [];
 		if (this.ws) {
 			this.ws.close();
 			this.ws = null;
@@ -149,8 +154,11 @@ class DashboardStore {
 		this.ws.onmessage = (e) => {
 			try {
 				const event: UiEvent = JSON.parse(e.data);
-				this.pendingEvents.push(event);
-				this.scheduleFlush();
+				// Drop if too many pending — prevents browser freeze
+				if (this.pendingEvents.length < 100) {
+					this.pendingEvents.push(event);
+					this.scheduleFlush();
+				}
 			} catch { /* ignore parse errors */ }
 		};
 	}
@@ -165,12 +173,12 @@ class DashboardStore {
 	}
 
 	private scheduleFlush() {
-		if (this.flushScheduled) return;
-		this.flushScheduled = true;
-		requestAnimationFrame(() => {
-			this.flushScheduled = false;
+		if (this.flushTimer) return;
+		// Flush at 2 Hz max — worker stats don't need 60fps updates
+		this.flushTimer = setTimeout(() => {
+			this.flushTimer = null;
 			this.flushEvents();
-		});
+		}, 500);
 	}
 
 	private flushEvents() {
@@ -178,11 +186,26 @@ class DashboardStore {
 		this.pendingEvents = [];
 		if (events.length === 0) return;
 
+		// Deduplicate: for WorkerEvent/Progress, only keep the latest per worker
+		const latestProgress = new Map<string, WorkerMessage>();
+		const filtered: UiEvent[] = [];
+		for (const event of events) {
+			if (event.type === 'WorkerEvent' && event.event?.type === 'Progress') {
+				latestProgress.set(event.worker_id, event.event);
+			} else {
+				filtered.push(event);
+			}
+		}
+		// Re-add only the latest progress per worker
+		for (const [workerId, msg] of latestProgress) {
+			filtered.push({ type: 'WorkerEvent', worker_id: workerId, event: msg });
+		}
+
 		// Mutate a single map copy, assign once at the end
 		const map = new Map(this.workers);
 		let columnOrderChanged = false;
 
-		for (const event of events) {
+		for (const event of filtered) {
 			switch (event.type) {
 				case 'WorkerConnected': {
 					map.set(event.worker_id, {
@@ -245,9 +268,22 @@ class DashboardStore {
 				break;
 			}
 			case 'Discovery': {
+				const cid = msg.cid ?? '';
+				const gems = [...w.bestGems];
+
+				// Check if this CID already exists in the pool
+				const existingIdx = gems.findIndex(g => g.cid === cid);
+				if (existingIdx !== -1) {
+					// Already have this graph — just refresh its timestamp
+					gems[existingIdx] = { ...gems[existingIdx], lastUpdated: Date.now() };
+					map.set(workerId, { ...w, bestGems: gems });
+					break;
+				}
+
+				// New discovery — insert sorted by score
 				const gem: RainGemData = {
 					graph6: msg.graph6 ?? '',
-					cid: msg.cid ?? '',
+					cid,
 					n: w.n,
 					goodmanGap: msg.goodman_gap ?? 0,
 					autOrder: msg.aut_order ?? 1,
@@ -258,8 +294,6 @@ class DashboardStore {
 					lastUpdated: Date.now(),
 				};
 
-				// Insert into sorted bestGems (lower score_hex = better)
-				const gems = [...w.bestGems];
 				const insertIdx = gems.findIndex(g => gem.scoreHex < g.scoreHex);
 				if (insertIdx === -1) {
 					gems.push(gem);
