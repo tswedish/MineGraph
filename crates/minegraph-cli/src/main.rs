@@ -355,10 +355,7 @@ async fn handle_workers_command(relay: &str, action: WorkerAction) -> Result<()>
 
     match action {
         WorkerAction::List => {
-            let resp = client
-                .get(format!("{relay}/api/workers"))
-                .send()
-                .await?;
+            let resp = client.get(format!("{relay}/api/workers")).send().await?;
             let data: serde_json::Value = resp.json().await?;
 
             let workers = data["workers"].as_array();
@@ -379,9 +376,7 @@ async fn handle_workers_command(relay: &str, action: WorkerAction) -> Result<()>
                     } else {
                         "unverified"
                     };
-                    let api = w["api_addr"]
-                        .as_str()
-                        .unwrap_or("(no API)");
+                    let api = w["api_addr"].as_str().unwrap_or("(no API)");
                     println!("  {wid:<16} key={kid:<16} n={n:<4} {strat:<8} {verified:<12} {api}");
                 }
             }
@@ -389,20 +384,14 @@ async fn handle_workers_command(relay: &str, action: WorkerAction) -> Result<()>
 
         WorkerAction::Status { worker } => {
             let api_addr = resolve_worker_api(&client, relay, &worker).await?;
-            let resp = client
-                .get(format!("{api_addr}/api/status"))
-                .send()
-                .await?;
+            let resp = client.get(format!("{api_addr}/api/status")).send().await?;
             let data: serde_json::Value = resp.json().await?;
             println!("{}", serde_json::to_string_pretty(&data)?);
         }
 
         WorkerAction::Config { worker } => {
             let api_addr = resolve_worker_api(&client, relay, &worker).await?;
-            let resp = client
-                .get(format!("{api_addr}/api/config"))
-                .send()
-                .await?;
+            let resp = client.get(format!("{api_addr}/api/config")).send().await?;
             let data: serde_json::Value = resp.json().await?;
 
             if let Some(params) = data["params"].as_array() {
@@ -426,9 +415,9 @@ async fn handle_workers_command(relay: &str, action: WorkerAction) -> Result<()>
             // Parse key=value pairs
             let mut patch = serde_json::Map::new();
             for param in &params {
-                let (key, val_str) = param
-                    .split_once('=')
-                    .ok_or_else(|| anyhow::anyhow!("invalid param format: {param} (expected key=value)"))?;
+                let (key, val_str) = param.split_once('=').ok_or_else(|| {
+                    anyhow::anyhow!("invalid param format: {param} (expected key=value)")
+                })?;
 
                 // Try to parse as number first, then bool, then string
                 let value: serde_json::Value = if let Ok(v) = val_str.parse::<i64>() {
@@ -479,10 +468,7 @@ async fn handle_workers_command(relay: &str, action: WorkerAction) -> Result<()>
 
         WorkerAction::Pause { worker } => {
             let api_addr = resolve_worker_api(&client, relay, &worker).await?;
-            let resp = client
-                .post(format!("{api_addr}/api/pause"))
-                .send()
-                .await?;
+            let resp = client.post(format!("{api_addr}/api/pause")).send().await?;
             let data: serde_json::Value = resp.json().await?;
             if data["ok"].as_bool().unwrap_or(false) {
                 println!("Paused {worker}");
@@ -493,10 +479,7 @@ async fn handle_workers_command(relay: &str, action: WorkerAction) -> Result<()>
 
         WorkerAction::Resume { worker } => {
             let api_addr = resolve_worker_api(&client, relay, &worker).await?;
-            let resp = client
-                .post(format!("{api_addr}/api/resume"))
-                .send()
-                .await?;
+            let resp = client.post(format!("{api_addr}/api/resume")).send().await?;
             let data: serde_json::Value = resp.json().await?;
             if data["ok"].as_bool().unwrap_or(false) {
                 println!("Resumed {worker}");
@@ -507,10 +490,7 @@ async fn handle_workers_command(relay: &str, action: WorkerAction) -> Result<()>
 
         WorkerAction::Stop { worker } => {
             let api_addr = resolve_worker_api(&client, relay, &worker).await?;
-            let resp = client
-                .post(format!("{api_addr}/api/stop"))
-                .send()
-                .await?;
+            let resp = client.post(format!("{api_addr}/api/stop")).send().await?;
             let data: serde_json::Value = resp.json().await?;
             if data["ok"].as_bool().unwrap_or(false) {
                 println!("Stopped {worker}");
@@ -529,10 +509,7 @@ async fn resolve_worker_api(
     relay: &str,
     worker_id: &str,
 ) -> Result<String> {
-    let resp = client
-        .get(format!("{relay}/api/workers"))
-        .send()
-        .await?;
+    let resp = client.get(format!("{relay}/api/workers")).send().await?;
     let data: serde_json::Value = resp.json().await?;
 
     let workers = data["workers"]
@@ -544,24 +521,20 @@ async fn resolve_worker_api(
         .iter()
         .find(|w| w["worker_id"].as_str() == Some(worker_id))
         .or_else(|| {
-            workers
-                .iter()
-                .find(|w| {
-                    w["worker_id"]
-                        .as_str()
-                        .is_some_and(|id| id.starts_with(worker_id))
-                })
+            workers.iter().find(|w| {
+                w["worker_id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with(worker_id))
+            })
         })
         .ok_or_else(|| anyhow::anyhow!("worker '{worker_id}' not found on relay"))?;
 
-    let api_addr = worker["api_addr"]
-        .as_str()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "worker '{}' has no API endpoint (upgrade worker binary or use --api-port)",
-                worker["worker_id"].as_str().unwrap_or(worker_id)
-            )
-        })?;
+    let api_addr = worker["api_addr"].as_str().ok_or_else(|| {
+        anyhow::anyhow!(
+            "worker '{}' has no API endpoint (upgrade worker binary or use --api-port)",
+            worker["worker_id"].as_str().unwrap_or(worker_id)
+        )
+    })?;
 
     Ok(api_addr.to_string())
 }

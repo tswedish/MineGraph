@@ -125,7 +125,9 @@ async fn run_connection(
                                 Some(challenge.nonce)
                             }
                             Err(_) => {
-                                warn!("unexpected first message (not a challenge), continuing without auth");
+                                warn!(
+                                    "unexpected first message (not a challenge), continuing without auth"
+                                );
                                 None
                             }
                         }
@@ -138,24 +140,23 @@ async fn run_connection(
                 };
 
                 // 2. Build Register message with auth fields
-                let (sig_hex, pk_hex) =
-                    if let (Some(nonce), Some(id), Some(pk)) =
-                        (&nonce_hex, &identity, &public_key_hex)
-                    {
-                        // Sign the raw nonce bytes
-                        match hex::decode(nonce) {
-                            Ok(nonce_bytes) => {
-                                let signature = id.sign(&nonce_bytes);
-                                (Some(signature), Some(pk.clone()))
-                            }
-                            Err(e) => {
-                                warn!("invalid nonce hex: {e}");
-                                (None, None)
-                            }
+                let (sig_hex, pk_hex) = if let (Some(nonce), Some(id), Some(pk)) =
+                    (&nonce_hex, &identity, &public_key_hex)
+                {
+                    // Sign the raw nonce bytes
+                    match hex::decode(nonce) {
+                        Ok(nonce_bytes) => {
+                            let signature = id.sign(&nonce_bytes);
+                            (Some(signature), Some(pk.clone()))
                         }
-                    } else {
-                        (None, None)
-                    };
+                        Err(e) => {
+                            warn!("invalid nonce hex: {e}");
+                            (None, None)
+                        }
+                    }
+                } else {
+                    (None, None)
+                };
 
                 let register_msg = WorkerMessage::Register {
                     key_id: key_id.clone(),

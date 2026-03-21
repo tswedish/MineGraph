@@ -79,9 +79,7 @@ async fn handle_worker(mut socket: WebSocket, state: DashboardState) {
         };
 
     // 3. Verify Ed25519 signature of challenge nonce
-    let verified = if let (Some(pk_hex), Some(sig_hex)) =
-        (&public_key_hex, &nonce_signature)
-    {
+    let verified = if let (Some(pk_hex), Some(sig_hex)) = (&public_key_hex, &nonce_signature) {
         match verify_worker_auth(&key_id, pk_hex, &nonce_bytes, sig_hex) {
             Ok(true) => {
                 info!(worker_id, key_id, "worker signature verified");
