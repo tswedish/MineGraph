@@ -6,9 +6,10 @@
 <div class="app">
 	<header>
 		<nav>
-			<a href="/" class="logo">Extremal</a>
+			<a href="https://extremalgames.org" class="logo" target="_blank" rel="noopener noreferrer">Extremal Games</a>
 			<div class="nav-links">
 				<a href="/leaderboards">Leaderboards</a>
+				<a href="/submit">Submit</a>
 				<a href="/dashboard">Dashboard</a>
 				<a href="/rain">Rain</a>
 				<a href="https://github.com/tswedish/Extremal" target="_blank" rel="noopener noreferrer" class="github-link" title="GitHub">

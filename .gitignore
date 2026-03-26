@@ -39,3 +39,4 @@ Desktop.ini
 
 # Screenshots (dev artifacts)
 *.png
+!Extremal-logo.png
