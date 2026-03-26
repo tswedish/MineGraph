@@ -17,16 +17,16 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/extremal/web:$COMMIT_SHA']
 
-  # Deploy server and web
+  # Deploy server and web (services still named minegraph-* on GCP, domain mappings point there)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
-    args: ['run', 'deploy', 'extremal-server',
+    args: ['run', 'deploy', 'minegraph-server',
            '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/extremal/server:$COMMIT_SHA',
            '--region=${_REGION}']
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
-    args: ['run', 'deploy', 'extremal-web',
+    args: ['run', 'deploy', 'minegraph-web',
            '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/extremal/web:$COMMIT_SHA',
            '--region=${_REGION}']
 
