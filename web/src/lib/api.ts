@@ -136,6 +136,69 @@ export async function getSubmission(cid: string): Promise<SubmissionDetail> {
 	return get(`/submissions/${cid}`);
 }
 
+// ── Write endpoints ────────────────────────────────────────
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+	const res = await fetch(`${BASE}${path}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	});
+	if (!res.ok) {
+		const data = await res.json().catch(() => ({ error: res.statusText }));
+		throw new Error(data.error || res.statusText);
+	}
+	return res.json();
+}
+
+export interface VerifyResponse {
+	cid: string;
+	n: number;
+	histogram: { tiers: { k: number; red: number; blue: number }[] };
+	goodman_gap: number;
+	aut_order: number;
+	canonical_graph6: string;
+}
+
+export interface SubmitResponse {
+	cid: string;
+	verdict: string;
+	admitted: boolean;
+	rank: number | null;
+	receipt: {
+		server_key_id: string;
+		signature: string;
+		score: {
+			histogram: { tiers: { k: number; red: number; blue: number }[] };
+			goodman_gap: number;
+			aut_order: number;
+		};
+	};
+}
+
+export interface RegisterKeyResponse {
+	key_id: string;
+	display_name: string | null;
+	github_repo: string | null;
+	created_at: string;
+}
+
+export async function verifyGraph(n: number, graph6: string): Promise<VerifyResponse> {
+	return post('/verify', { n, graph6 });
+}
+
+export async function submitGraph(
+	n: number, graph6: string, keyId: string, signature: string, metadata?: Record<string, unknown>,
+): Promise<SubmitResponse> {
+	return post('/submit', { n, graph6, key_id: keyId, signature, metadata });
+}
+
+export async function registerKey(
+	publicKey: string, displayName?: string,
+): Promise<RegisterKeyResponse> {
+	return post('/keys', { public_key: publicKey, display_name: displayName });
+}
+
 // ── SSE ─────────────────────────────────────────────────────
 
 export function subscribeEvents(onEvent: (event: ServerEvent) => void): () => void {
