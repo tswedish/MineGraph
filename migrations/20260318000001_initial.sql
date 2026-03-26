@@ -1,4 +1,4 @@
--- Extremal v1 initial schema
+-- MineGraph v1 initial schema
 
 -- Server identity (server's own keypair for signing receipts)
 CREATE TABLE IF NOT EXISTS server_config (
