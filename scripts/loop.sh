@@ -158,6 +158,26 @@ EOF
     sleep 30
 fi
 
+# If no fleet launched, find existing log dir or create minimal config
+if [[ "$LAUNCH_FLEET" == "false" ]]; then
+    EXISTING=$(ls -td logs/agent-* 2>/dev/null | head -1)
+    if [[ -n "$EXISTING" ]]; then
+        LOG_DIR="$EXISTING"
+        echo "Using existing log dir: $LOG_DIR"
+    else
+        cat > "$LOG_DIR/config.json" <<EOF
+{
+    "commit": "$COMMIT",
+    "started": "$STARTED",
+    "n": $N,
+    "server": "$SERVER",
+    "dashboard": "$DASHBOARD",
+    "log_dir": "$LOG_DIR"
+}
+EOF
+    fi
+fi
+
 # ── Observation Loop ─────────────────────────────────────
 CYCLE=0
 while true; do
@@ -213,7 +233,7 @@ PROMPT_EOF
         --print \
         --model "$MODEL" \
         --effort max \
-        --append-system-prompt-file ".claude/skills/experiment.md" \
+        --append-system-prompt-file "skills/experiment.md" \
         --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
         --max-budget-usd "$BUDGET" \
         --no-session-persistence \

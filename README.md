@@ -63,7 +63,47 @@ One reason I built this project was to test to see how good AI gets at optimizin
 | `extremal-cli` | CLI: keygen, submit, score, leaderboard, worker management |
 | `extremal-dashboard` | Relay server: WebSocket, Ed25519 challenge/response auth |
 
-## Quick Start
+## Quick Start with Claude Code
+
+The fastest way to start contributing graphs to the production leaderboard. Requires [Rust](https://rustup.rs/), [Claude Code](https://claude.ai/claude-code), and a local PostgreSQL.
+
+```bash
+# 1. Set up local database + server (one-time)
+sudo -u postgres createuser extremal && sudo -u postgres createdb -O extremal extremal
+sudo -u postgres psql -c "ALTER USER extremal WITH PASSWORD 'extremal';"
+cp .env.example .env
+cargo run -p extremal-server -- --migrate
+
+# 2. Start local services (two terminals)
+./run server      # Terminal 1: leaderboard server on :3001
+./run dashboard   # Terminal 2: worker dashboard relay on :4000
+
+# 3. Launch the autonomous agent (submits to production)
+./run agent-orchestrate
+```
+
+That's it. The orchestrator will:
+- Build the release worker binary
+- Generate and register a signing key
+- Launch a fleet of 4 diverse search workers (connected to your local dashboard for monitoring)
+- Run Claude (opus, max thinking) in a loop — observing worker performance, adjusting parameters, and implementing new strategies
+- Submit discovered graphs to the production leaderboard at [extremal.online](https://extremal.online)
+
+Open the dashboard UI to watch your workers in real-time:
+```bash
+./run dashboard-ui   # Terminal 3: opens on :5174
+```
+
+### Orchestrator options
+
+```bash
+./run agent-orchestrate --local            # Submit to local server instead
+./run agent-orchestrate --workers 8        # More workers (default: 4)
+./run agent-orchestrate --experiment       # Skip research, just run experiments
+./run agent-orchestrate --research         # Skip experiments, implement next strategy idea
+```
+
+## Manual Setup
 
 ### Prerequisites
 
@@ -100,14 +140,18 @@ cargo run -p extremal-cli -- register-key
 
 ```bash
 # Single worker
-cargo run -p extremal-worker -- --n 25 --beam-width 80 --max-depth 12
+cargo run -p extremal-worker -- --n 25 --beam-width 150 --noise-flips 2
 
-# With dashboard connection
-cargo run -p extremal-worker -- --n 25 --beam-width 80 \
+# With dashboard + production server
+cargo run -p extremal-worker -- --n 25 --beam-width 150 --noise-flips 2 \
+  --server https://api.extremal.online \
   --dashboard ws://localhost:4000/ws/worker
 
-# Fleet of diverse workers
-./scripts/experiment.sh 25
+# Agent-managed fleet (experiment loop without research)
+./run agent-loop
+
+# Fleet of diverse workers (manual)
+./scripts/agent-fleet.sh --workers 8 --n 25 --polish 100
 ```
 
 ### Dashboard and web apps
@@ -126,8 +170,6 @@ extremal submit --n 5 --graph6 'Dhc'          # Submit to server
 extremal leaderboard --n 25                    # View leaderboard
 extremal health                                # Server health
 extremal workers list                          # List connected workers
-extremal workers set fleet-1 beam_width=200    # Adjust worker params
-extremal workers pause fleet-1                 # Pause a worker
 ```
 
 ### Docker
@@ -173,7 +215,7 @@ Port 3001, prefix `/api/`. Rate limited (5/s scoring, 100/s global per IP).
 ./run fmt       # Format
 ```
 
-86 tests including property-based tests for graph6 encode/decode.
+94 tests including property-based tests for graph6 encode/decode.
 
 ## License
 

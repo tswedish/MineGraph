@@ -57,11 +57,16 @@ cargo run -p extremal-cli -- workers stop fleet-1
 ```
 
 ```bash
-# Experiment agent loop (launches fleet + runs Claude in observe-decide-act loop)
+# Meta-agent orchestrator (auto-alternates research + experiments)
+./run agent-orchestrate                               # Production, auto-decide
+./run agent-orchestrate --local                       # Local dev server
+./run agent-orchestrate --research                    # Force research mode
+./run agent-orchestrate --experiment --workers 8      # Force experiment mode
+
+# Experiment-only loop (fleet + observe-decide-act cycles)
 ./run agent-loop                                      # Production server, 4 workers
 ./run agent-loop --local                              # Local dev server
 ./run agent-loop --workers 8 --polish 200             # More workers, deeper polish
-./run agent-loop --interval 3m --budget 2.00          # Faster cycles, higher budget
 ./run agent-loop --no-fleet                           # Observe only (fleet already running)
 
 # Manual fleet management
