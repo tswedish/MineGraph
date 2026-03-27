@@ -100,19 +100,33 @@ curl -sf https://api.extremal.online/api/leaderboards/25/export
 
 ## Analyze Phase
 
-1. **Plateau detection**: admission rate < 1/5min for 3+ consecutive observations
+1. **Plateau detection**: admission rate = 0 for **1-2 hours** (not minutes). On saturated leaderboards, progress is slow — be patient
 2. **Worker comparison**: which config has highest admit rate per minute?
 3. **Score frontier**: compare snapshots — is top score improving?
 4. **Round time budget**: polish_max_steps dominates round time when many valid graphs are found
 5. **Score history trend**: query `/api/leaderboards/25/history` to see if `avg_gap` and `best_gap` are still improving or have plateaued. A flat `avg_gap` over several snapshots signals the current strategy has hit its ceiling — time to signal the orchestrator for research.
 
 ### Lessons learned
+
+**Patience and scale:**
+- **Do NOT declare plateau after 5-15 minutes.** On saturated leaderboards, progress takes hours or days. Wait at least 1-2 hours of zero admits before concluding the algorithm is stuck.
+- **Any admission on a full leaderboard means scores are improving.** Even 1 admit/hour is progress — the new graph necessarily beat an existing entry. Track total admissions over time, not just rate.
+- **Scale workers up to 16** before concluding the algorithm can't make progress. It may be a throughput issue, not an algorithmic ceiling. Check CPU load with `top` or `htop` and add workers if there's headroom.
+- **An nvidia GPU is available locally** — consider GPU acceleration for compute-intensive operations (clique counting, candidate evaluation).
+
+**Richer metrics — don't fixate on avg_gap alone:**
+- Track average 4-clique counts across the leaderboard (query history endpoint)
+- Watch the distribution shift: fewer high-4-clique graphs being displaced = progress
+- Score history (`/api/leaderboards/25/history`) shows `best_gap`, `avg_gap`, `best_aut`, `avg_aut` over time
+- Compare score distributions between snapshots, not just single summary stats
+
+**Operational:**
 - **First round is always slow** (~2min) because it starts from Paley seed with 100K iters. Subsequent rounds are faster (seeded from leaderboard).
 - **polish_max_steps=100 is a good default**. 500 was too slow for first round. Can increase to 200-500 via runtime config adjustment after warmup.
 - **Round 1 submissions fail if key isn't registered** — loop.sh and agent-fleet.sh handle this automatically.
 - **Polish debug logs require RUST_LOG=debug** — at info level, use worker HTTP API `/api/status` for metrics instead.
 - **Dashboard shows only 1 worker per worker_id** — always use unique worker_ids in metadata.
-- **Threshold gating is aggressive on full leaderboards** — hundreds of thousands of graphs skipped. This is normal.
+- **Threshold gating is aggressive on full leaderboards** — hundreds of thousands of graphs skipped. This is normal and expected.
 - **Use direct HTTP API for config changes, NOT the CLI `workers set` command** — the CLI discovers workers via relay and times out. Instead: `curl -sf -X POST http://localhost:$PORT/api/config -H "Content-Type: application/json" -d '{"param": value}'`
 - **Worker API ports** are in the agent-status.sh output, or query: `curl -sf http://localhost:4000/api/workers`
 - **beam_width=150 + noise_flips=2 + sample_bias=0.4** was the clear winner in production experiments (19 admits/min vs 0.2-6.7 for other configs).

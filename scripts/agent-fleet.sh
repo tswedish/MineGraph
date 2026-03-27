@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # ── Defaults ─────────────────────────────────────────────
-WORKERS=4
+WORKERS=8
 N=25
 TARGET_K=5
 TARGET_ELL=5

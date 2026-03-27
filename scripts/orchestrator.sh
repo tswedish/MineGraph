@@ -29,12 +29,12 @@ cd "$(dirname "$0")/.."
 # ── Defaults ─────────────────────────────────────────────
 SERVER="https://api.extremal.online"
 MODE="auto"          # auto, research, experiment
-WORKERS=4
+WORKERS=8
 POLISH=100
-EXPERIMENT_INTERVAL="5m"
-EXPERIMENT_CYCLES=5  # how many experiment cycles before re-evaluating
+EXPERIMENT_INTERVAL="10m"
+EXPERIMENT_CYCLES=12  # how many experiment cycles before re-evaluating (~2 hours)
 RESEARCH_BUDGET="5.00"
-EXPERIMENT_BUDGET="1.00"
+EXPERIMENT_BUDGET="1.50"
 MODEL="opus"
 
 # ── Parse args ───────────────────────────────────────────
@@ -173,15 +173,29 @@ Stay on the current git branch. One change only. CI must pass.
 RESEARCH_EOF
 )
 
-        echo "$RESEARCH_PROMPT" | claude \
-            --print \
-            --model "$MODEL" \
-            --effort max \
-            --append-system-prompt-file "skills/strategy-research.md" \
-            --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
-            --max-budget-usd "$RESEARCH_BUDGET" \
-            --no-session-persistence \
-            2>&1 | tee "$LOG_DIR/research-$ROUND.log"
+        RESEARCH_OK=false
+        for ATTEMPT in 1 2 3; do
+            if echo "$RESEARCH_PROMPT" | claude \
+                --print \
+                --model "$MODEL" \
+                --effort max \
+                --append-system-prompt-file "skills/strategy-research.md" \
+                --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
+                --max-budget-usd "$RESEARCH_BUDGET" \
+                --no-session-persistence \
+                2>&1 | tee "$LOG_DIR/research-$ROUND.log"; then
+                RESEARCH_OK=true
+                break
+            else
+                echo "  Research failed (attempt $ATTEMPT/3), retrying in 60s..."
+                sleep 60
+            fi
+        done
+
+        if [[ "$RESEARCH_OK" == "false" ]]; then
+            echo "  Research cycle failed after 3 attempts, skipping to next round."
+            continue
+        fi
 
         echo ""
         echo "  Research cycle complete. New commit: $(git rev-parse --short HEAD)"
@@ -242,15 +256,28 @@ Output a concise cycle report:
 EXPERIMENT_EOF
 )
 
-            echo "$EXPERIMENT_PROMPT" | claude \
-                --print \
-                --model "$MODEL" \
-                --effort max \
-                --append-system-prompt-file "skills/experiment.md" \
-                --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
-                --max-budget-usd "$EXPERIMENT_BUDGET" \
-                --no-session-persistence \
-                2>&1 | tee "$LOG_DIR/experiment-${ROUND}-${CYCLE}.log"
+            CYCLE_OK=false
+            for ATTEMPT in 1 2 3; do
+                if echo "$EXPERIMENT_PROMPT" | claude \
+                    --print \
+                    --model "$MODEL" \
+                    --effort max \
+                    --append-system-prompt-file "skills/experiment.md" \
+                    --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
+                    --max-budget-usd "$EXPERIMENT_BUDGET" \
+                    --no-session-persistence \
+                    2>&1 | tee "$LOG_DIR/experiment-${ROUND}-${CYCLE}.log"; then
+                    CYCLE_OK=true
+                    break
+                else
+                    echo "  Experiment cycle failed (attempt $ATTEMPT/3), retrying in 60s..."
+                    sleep 60
+                fi
+            done
+
+            if [[ "$CYCLE_OK" == "false" ]]; then
+                echo "  Cycle $CYCLE failed after 3 attempts, skipping."
+            fi
 
             rm -f "$STATUS_FILE"
 

@@ -123,3 +123,31 @@ for f in "$LOG_DIR"/*.log; do
         printf "  %-12s r%-3s unique=%-3s submit=%-3s admit=%-3s skip_thr=%-7s %sms\n" "$NAME" "$ROUND" "$UNIQUE" "$SUBMITTED" "$ADMITTED" "$SKIP_THR" "$MS"
     fi
 done
+
+echo ""
+
+# ── Score history trend ──────────────────────────────────
+echo "--- Score History (last 5 snapshots) ---"
+curl -sf "$SERVER/api/leaderboards/$N/history?limit=5" 2>/dev/null | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    snaps = data.get('snapshots', [])
+    if not snaps:
+        print('  (no history)')
+    else:
+        printf = lambda *a: print(*a)
+        for s in snaps:
+            t = s['t'][:16]
+            print(f'  {t}: count={s[\"count\"]} best_gap={s[\"best_gap\"]} avg_gap={s[\"avg_gap\"]:.2f} worst_gap={s[\"worst_gap\"]} best_aut={s[\"best_aut\"]} avg_aut={s[\"avg_aut\"]:.2f}')
+except:
+    print('  (unavailable)')
+" 2>/dev/null || echo "  (server unreachable)"
+
+# ── CPU load ─────────────────────────────────────────────
+echo ""
+echo "--- System Load ---"
+WORKER_COUNT=$(pgrep -c -f "extremal-worker" 2>/dev/null || echo 0)
+CORES=$(nproc 2>/dev/null || echo "?")
+LOAD=$(cat /proc/loadavg 2>/dev/null | awk '{print $1, $2, $3}' || echo "?")
+echo "  Workers: $WORKER_COUNT  Cores: $CORES  Load: $LOAD"

@@ -131,6 +131,20 @@
       "priority": "low",
       "rationale": "Single flips may not reach some valid graphs. Multi-flip could jump between disconnected valid-graph basins.",
       "estimated_effort": "high — changes to core search loop"
+    },
+    {
+      "id": "gpu-clique-counting",
+      "description": "GPU-accelerated clique counting and candidate evaluation via CUDA or wgpu compute shaders. nvidia GPU available locally.",
+      "priority": "medium",
+      "rationale": "Clique counting is the bottleneck (O(n^5) for k=5). GPU parallelism could speed up beam evaluation and polish by 10-100x, enabling more workers or deeper search per round.",
+      "estimated_effort": "high — CUDA FFI or wgpu compute shader, significant engineering"
+    },
+    {
+      "id": "scale-workers-16",
+      "description": "Run 16 workers simultaneously with known-best config. Pure throughput play.",
+      "priority": "high",
+      "rationale": "On saturated leaderboards, more compute = more chances to find rare better graphs. Check CPU headroom first. Zero code changes needed.",
+      "estimated_effort": "none — just --workers 16"
     }
   ]
 }

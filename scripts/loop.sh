@@ -27,10 +27,10 @@ SERVER="https://api.extremal.online"
 RELAY="http://localhost:4000"
 DASHBOARD="ws://localhost:4000/ws/worker"
 N=25
-WORKERS=4
+WORKERS=8
 POLISH=100
-INTERVAL="5m"
-BUDGET="1.00"
+INTERVAL="10m"
+BUDGET="1.50"
 MODEL="opus"
 LAUNCH_FLEET=true
 FLEET_PIDS=""
@@ -229,15 +229,29 @@ PROMPT_EOF
 
     # Run Claude with experiment skill loaded as system context
     # Using opus with max effort for deep analysis each cycle
-    echo "$PROMPT" | claude \
-        --print \
-        --model "$MODEL" \
-        --effort max \
-        --append-system-prompt-file "skills/experiment.md" \
-        --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
-        --max-budget-usd "$BUDGET" \
-        --no-session-persistence \
-        2>&1 | tee "$LOG_DIR/cycle-$CYCLE.log"
+    # Retry up to 3 times on transient failures (API overload, network errors)
+    CYCLE_OK=false
+    for ATTEMPT in 1 2 3; do
+        if echo "$PROMPT" | claude \
+            --print \
+            --model "$MODEL" \
+            --effort max \
+            --append-system-prompt-file "skills/experiment.md" \
+            --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
+            --max-budget-usd "$BUDGET" \
+            --no-session-persistence \
+            2>&1 | tee "$LOG_DIR/cycle-$CYCLE.log"; then
+            CYCLE_OK=true
+            break
+        else
+            echo "  Cycle failed (attempt $ATTEMPT/3), retrying in 60s..."
+            sleep 60
+        fi
+    done
+
+    if [[ "$CYCLE_OK" == "false" ]]; then
+        echo "  Cycle #$CYCLE failed after 3 attempts, skipping to next cycle."
+    fi
 
     rm -f "$STATUS_FILE"
 

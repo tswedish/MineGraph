@@ -72,13 +72,20 @@ This lets the research agent ask questions like "do graphs seeded from top-10 en
 
 ## Process
 
+### Compute resources
+
+- **CPU**: Up to 16 parallel workers on the local machine. Check `nproc` and `htop` for headroom.
+- **GPU**: An nvidia GPU is available locally. Consider GPU-accelerated clique counting, candidate evaluation, or batch scoring. CUDA/OpenCL FFI or wgpu compute shaders are options.
+- **Scaling**: More workers with good configs often beats algorithmic cleverness. Don't overlook throughput.
+
 ### 1. Assess
 
 Read the registry's `ideas` list and `strategies` list. Ask:
 - Which ideas are highest priority and lowest effort?
-- What's the current performance ceiling? (check top leaderboard scores)
-- Are there diminishing returns on current approaches? (check recent journal entries)
+- What's the current performance ceiling? (check top leaderboard scores via score history)
+- Are there diminishing returns on current approaches? (check recent journal — but note experiments need hours/days, not minutes, to show results on competitive leaderboards)
 - What's the biggest bottleneck: finding valid graphs, or scoring quality of valid graphs?
+- Could raw compute throughput (more workers) solve the problem before algorithmic changes?
 
 ### 2. Choose
 
