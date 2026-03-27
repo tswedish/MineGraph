@@ -57,10 +57,16 @@ cargo run -p extremal-cli -- workers stop fleet-1
 ```
 
 ```bash
-# Experiment agent (autonomous fleet management)
-./run agent-fleet --workers 4 --n 25 --polish 100   # Launch fleet
+# Experiment agent loop (launches fleet + runs Claude in observe-decide-act loop)
+./run agent-loop                                      # Production server, 4 workers
+./run agent-loop --local                              # Local dev server
+./run agent-loop --workers 8 --polish 200             # More workers, deeper polish
+./run agent-loop --interval 3m --budget 2.00          # Faster cycles, higher budget
+./run agent-loop --no-fleet                           # Observe only (fleet already running)
+
+# Manual fleet management
+./run agent-fleet --workers 4 --n 25 --polish 100   # Launch fleet without loop
 ./run agent-status                                    # Status report
-./run agent-status logs/agent-20260326-212338/        # Specific fleet
 ./run agent-snapshot 25                               # Leaderboard snapshot
 ./run stop-fleet                                      # Kill all workers
 ```
