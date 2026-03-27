@@ -85,6 +85,12 @@ case "$cmd" in
     agent-loop)
         ./scripts/loop.sh "${EXTRA_ARGS[@]}"
         ;;
+    agent-orchestrate)
+        ./scripts/orchestrator.sh "${EXTRA_ARGS[@]}"
+        ;;
+    agent-keep-alive)
+        ./scripts/keep-alive.sh ./run agent-orchestrate "${EXTRA_ARGS[@]}"
+        ;;
     agent-fleet)
         ./scripts/agent-fleet.sh "${EXTRA_ARGS[@]}"
         ;;
@@ -118,6 +124,8 @@ Commands:
   web-build   Build web app for production
   fleet       Launch worker fleet (--workers N --n N --dashboard URL)
   stop-fleet  Kill all running workers
+  agent-keep-alive  Keep orchestrator alive, restart on crash
+  agent-orchestrate  Meta-agent: auto-alternate research + experiments
   agent-loop  Autonomous experiment loop (--workers N --polish N --interval 5m)
   agent-fleet Launch experiment agent fleet (--workers N --n N --polish N)
   agent-status  Fleet status report (agent-status [LOG_DIR])
