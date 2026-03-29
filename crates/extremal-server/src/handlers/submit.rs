@@ -150,6 +150,9 @@ pub async fn submit_graph(
 
     // 9. Broadcast event + log
     if let Some(rank) = admitted {
+        // Invalidate cached threshold/CID/graph data for this leaderboard
+        state.cache.invalidate(req.n as i32).await;
+
         info!(
             n = req.n,
             rank,

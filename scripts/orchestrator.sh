@@ -53,6 +53,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+CLAUDE_TIMEOUT=900  # 15 min max per claude invocation
+
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 LOG_DIR="logs/orchestrator-$(date +%Y%m%d-%H%M%S)"
@@ -175,19 +177,27 @@ RESEARCH_EOF
 
         RESEARCH_OK=false
         for ATTEMPT in 1 2 3; do
-            if echo "$RESEARCH_PROMPT" | claude \
+            echo "  [$(date '+%H:%M:%S')] Research attempt $ATTEMPT/3 starting..."
+            if timeout "$CLAUDE_TIMEOUT" bash -c 'echo "$1" | claude \
                 --print \
-                --model "$MODEL" \
+                --model "$2" \
                 --effort max \
                 --append-system-prompt-file "skills/strategy-research.md" \
                 --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
-                --max-budget-usd "$RESEARCH_BUDGET" \
-                --no-session-persistence \
+                --max-budget-usd "$3" \
+                --no-session-persistence' \
+                _ "$RESEARCH_PROMPT" "$MODEL" "$RESEARCH_BUDGET" \
                 2>&1 | tee "$LOG_DIR/research-$ROUND.log"; then
                 RESEARCH_OK=true
+                echo "  [$(date '+%H:%M:%S')] Research attempt $ATTEMPT succeeded."
                 break
             else
-                echo "  Research failed (attempt $ATTEMPT/3), retrying in 60s..."
+                EXIT=$?
+                if [[ $EXIT -eq 124 ]]; then
+                    echo "  [$(date '+%H:%M:%S')] Research TIMED OUT after ${CLAUDE_TIMEOUT}s (attempt $ATTEMPT/3)"
+                else
+                    echo "  [$(date '+%H:%M:%S')] Research failed exit=$EXIT (attempt $ATTEMPT/3), retrying in 60s..."
+                fi
                 sleep 60
             fi
         done
@@ -230,8 +240,30 @@ RESEARCH_EOF
             STATUS_FILE=$(mktemp)
             ./scripts/agent-status.sh "$FLEET_LOG" > "$STATUS_FILE" 2>&1 || true
 
+            # Collect inbox messages
+            INBOX_DIR="experiments/agent/inbox"
+            INBOX_CONTENT=""
+            INBOX_FILES=()
+            for f in "$INBOX_DIR"/*.md; do
+                [[ -f "$f" ]] || continue
+                [[ "$(basename "$f")" == "README.md" ]] && continue
+                INBOX_FILES+=("$f")
+                INBOX_CONTENT="$INBOX_CONTENT
+--- $(basename "$f") ---
+$(cat "$f")
+"
+            done
+            INBOX_SECTION=""
+            if [[ -n "$INBOX_CONTENT" ]]; then
+                INBOX_SECTION="
+## Operator Messages (READ THESE FIRST)
+The operator left these messages for you. Address them in your response and actions.
+$INBOX_CONTENT"
+            fi
+
             EXPERIMENT_PROMPT=$(cat <<EXPERIMENT_EOF
 Run one experiment agent observe-decide-act cycle per the experiment skill protocol.
+$INBOX_SECTION
 
 ## Current Fleet Status
 $(cat "$STATUS_FILE")
@@ -247,36 +279,74 @@ Config changes: curl -sf -X POST http://localhost:PORT/api/config -H "Content-Ty
 
 Log actions to experiments/agent/journal.md.
 
-Output a concise cycle report:
-  ## Cycle $CYCLE/$EXPERIMENT_CYCLES [$(date '+%H:%M')]
-  **Leaderboard**: [entry count, top score, our count]
-  **Fleet**: [total rounds, total admits, best worker rate]
-  **Action**: [what you did, or "none"]
-  **Next**: [what to watch for]
+## Output Format
+
+Print your cycle report to stdout. This is what the operator sees in their terminal, so make
+it engaging and insightful. Structure it EXACTLY like this:
+
+---
+## Cycle $CYCLE/$EXPERIMENT_CYCLES [$(date '+%H:%M')]
+
+**Leaderboard**: [entry count, top score breakdown, trend direction]
+**Fleet**: [total rounds, discoveries, admissions, best worker + why]
+**Threshold**: [current admission bar, how far our best candidates are from it]
+
+### What I'm Seeing
+[2-3 sentences of genuine analysis. What patterns are emerging? What's surprising?
+Are certain configs consistently outperforming? Is the search space exhausted or
+is there signal that better graphs exist? What does the score distribution look like?]
+
+### Strategy Thinking
+[1-2 sentences on current theory. Why are we running these configs? What hypothesis
+are we testing? What would change our approach?]
+
+### Actions Taken
+[Bullet list of changes made this cycle, or "None — observing" with reasoning]
+
+### Next Cycle
+[What to watch for. What would trigger a strategy change?]
+---
 EXPERIMENT_EOF
 )
 
+            # Move inbox files to processed
+            if [[ ${#INBOX_FILES[@]} -gt 0 ]]; then
+                mkdir -p "$INBOX_DIR/processed"
+                for f in "${INBOX_FILES[@]}"; do
+                    mv "$f" "$INBOX_DIR/processed/$(date +%Y%m%d-%H%M%S)-$(basename "$f")"
+                done
+                echo "  Processed ${#INBOX_FILES[@]} inbox message(s)"
+            fi
+
             CYCLE_OK=false
             for ATTEMPT in 1 2 3; do
-                if echo "$EXPERIMENT_PROMPT" | claude \
+                echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE attempt $ATTEMPT/3 starting..."
+                if timeout "$CLAUDE_TIMEOUT" bash -c 'echo "$1" | claude \
                     --print \
-                    --model "$MODEL" \
+                    --model "$2" \
                     --effort max \
                     --append-system-prompt-file "skills/experiment.md" \
                     --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
-                    --max-budget-usd "$EXPERIMENT_BUDGET" \
-                    --no-session-persistence \
+                    --max-budget-usd "$3" \
+                    --no-session-persistence' \
+                    _ "$EXPERIMENT_PROMPT" "$MODEL" "$EXPERIMENT_BUDGET" \
                     2>&1 | tee "$LOG_DIR/experiment-${ROUND}-${CYCLE}.log"; then
                     CYCLE_OK=true
+                    echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE attempt $ATTEMPT succeeded."
                     break
                 else
-                    echo "  Experiment cycle failed (attempt $ATTEMPT/3), retrying in 60s..."
+                    EXIT=$?
+                    if [[ $EXIT -eq 124 ]]; then
+                        echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE TIMED OUT after ${CLAUDE_TIMEOUT}s (attempt $ATTEMPT/3)"
+                    else
+                        echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE failed exit=$EXIT (attempt $ATTEMPT/3), retrying in 60s..."
+                    fi
                     sleep 60
                 fi
             done
 
             if [[ "$CYCLE_OK" == "false" ]]; then
-                echo "  Cycle $CYCLE failed after 3 attempts, skipping."
+                echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE failed after 3 attempts, skipping."
             fi
 
             rm -f "$STATUS_FILE"
