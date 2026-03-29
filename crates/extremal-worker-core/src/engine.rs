@@ -983,6 +983,18 @@ pub async fn run_engine(
                 server_cids.remove(&cid);
             }
         }
+        // Trim dashboard dedup set (same cap as known_cids)
+        if dash_sent_cids.len() > config.max_known_cids {
+            let target = config.max_known_cids / 2;
+            let drain: Vec<_> = dash_sent_cids
+                .iter()
+                .take(dash_sent_cids.len() - target)
+                .copied()
+                .collect();
+            for cid in drain {
+                dash_sent_cids.remove(&cid);
+            }
+        }
 
         if shutdown.has_changed().unwrap_or(false) && *shutdown.borrow() {
             info!("shutdown signal received after round");

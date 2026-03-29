@@ -1,5 +1,6 @@
 //! Application state shared across all handlers.
 
+use crate::cache::LeaderboardCache;
 use extremal_identity::Identity;
 use extremal_store::Store;
 use std::sync::Arc;
@@ -21,6 +22,8 @@ pub struct AppState {
     pub events_tx: broadcast::Sender<ServerEvent>,
     /// Allowed CORS origins (None = permissive / dev mode).
     pub allowed_origins: Option<Vec<String>>,
+    /// In-memory cache for hot leaderboard queries.
+    pub cache: Arc<LeaderboardCache>,
 }
 
 /// Events broadcast to SSE subscribers.

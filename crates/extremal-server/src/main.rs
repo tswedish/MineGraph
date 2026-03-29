@@ -134,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
         max_n: config.max_n,
         events_tx,
         allowed_origins,
+        cache: Arc::new(extremal_server::cache::LeaderboardCache::new()),
     };
 
     // Background task: snapshot leaderboard stats every 10 minutes

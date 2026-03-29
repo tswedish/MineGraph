@@ -11,19 +11,33 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CMD="${@:-./run agent-orchestrate}"
+if [[ $# -gt 0 ]]; then
+    CMD=("$@")
+else
+    CMD=(./run agent-orchestrate)
+fi
 COOLDOWN=30
+KEEP_ALIVE_LOG="logs/keep-alive.log"
+mkdir -p logs
 
-echo "Keep-alive: will restart '$CMD' on failure"
+log() {
+    local msg="$(date '+%Y-%m-%d %H:%M:%S') $1"
+    echo "$msg"
+    echo "$msg" >> "$KEEP_ALIVE_LOG"
+}
+
+log "Keep-alive: will restart '${CMD[*]}' on failure"
 echo "  Ctrl-C to stop permanently"
 echo ""
 
+RESTART_COUNT=0
 while true; do
-    echo "$(date '+%Y-%m-%d %H:%M:%S') Starting: $CMD"
-    $CMD && break  # clean exit = stop
+    log "Starting (restart #$RESTART_COUNT): ${CMD[*]}"
+    "${CMD[@]}" && break  # clean exit = stop
     EXIT_CODE=$?
     echo ""
-    echo "$(date '+%Y-%m-%d %H:%M:%S') Process exited with code $EXIT_CODE"
-    echo "  Restarting in ${COOLDOWN}s... (Ctrl-C to stop)"
+    log "Process exited with code $EXIT_CODE"
+    RESTART_COUNT=$((RESTART_COUNT + 1))
+    log "Restarting in ${COOLDOWN}s... (Ctrl-C to stop)"
     sleep "$COOLDOWN"
 done

@@ -52,6 +52,13 @@ All state persists in `experiments/agent/`:
 - `findings.json` - Validated parameter sensitivities and strategy rankings
 - `state.json` - Current session config
 - `snapshots/` - Leaderboard JSON snapshots (via `agent-snapshot.sh`)
+- `inbox/` - Operator messages (see below)
+
+### Operator Inbox (`experiments/agent/inbox/`)
+
+The operator can drop `.md` files here to send you messages between cycles. If your prompt
+includes an "Operator Messages" section, address those messages FIRST in your response and
+actions. The orchestrator moves processed files to `inbox/processed/` automatically.
 
 ### Strategy Registry (`strategies.json`)
 
@@ -205,26 +212,37 @@ curl -sf -X POST http://localhost:$PORT/api/stop
 
 ## Report Format
 
+Your stdout output is displayed directly in the operator's terminal. Make it engaging and
+insightful — the operator is watching to understand what the search is doing and why.
+
 ```
-## Experiment Report [HH:MM]
+## Cycle N/M [HH:MM]
 
-**Leaderboard**: X entries for n=N, top 4c=(X,Y) 3c=(X,Y)
-**Fleet**: W workers, commit HASH, uptime Xm
-**Admission rate**: Y/min (was Z/min last check)
+**Leaderboard**: X entries, top 4c=(X,Y) gap=Z, trend [improving/flat/degrading]
+**Fleet**: W workers, R rounds, D discoveries, A admissions, best: [worker] ([why])
+**Threshold**: 4c=(X,Y) — [how close are we / what it would take to break through]
 
-### Per-Worker
-| Worker | Rounds | Disc | Admitted | Rate/min | Round ms |
-|--------|--------|------|----------|----------|----------|
+### What I'm Seeing
+[2-3 sentences of genuine analysis. What patterns are emerging across workers?
+Which configs produce results and which don't? Is the landscape being explored
+effectively? Any signs of convergence or exhaustion? What does the skip_thr
+count tell us about threshold saturation?]
 
-### Actions Taken Since Last Report
-- [timestamp] [action] [result]
+### Strategy Thinking
+[Your current theory about what will produce improvements. What hypothesis are
+you testing with the current fleet composition? What evidence would confirm or
+refute it? Reference prior journal findings if relevant.]
 
-### Key Finding
-[Finding with evidence]
+### Actions Taken
+- [Specific change with reasoning], or
+- None — [why observing is the right call this cycle]
 
-### Proposed Next Action
-[Description]. Proceed? (y/n)
+### Next Cycle
+[Concrete things to watch. What metric change would trigger action?]
 ```
+
+Keep the analysis genuine — don't pad with boilerplate. If nothing interesting happened,
+say that honestly and explain what conditions you're waiting for.
 
 ## Journal Entry Format
 

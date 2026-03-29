@@ -78,13 +78,27 @@ pub async fn get_leaderboard(
     })))
 }
 
-/// GET /api/leaderboards/:n/threshold — admission threshold.
+/// GET /api/leaderboards/:n/threshold — admission threshold (cached).
 pub async fn get_threshold(
     State(state): State<AppState>,
     Path(n): Path<i32>,
 ) -> Result<Json<Value>, ApiError> {
+    // Check cache first
+    if let Some((count, threshold)) = state.cache.get_threshold(n).await {
+        return Ok(Json(json!({
+            "n": n,
+            "count": count,
+            "capacity": state.leaderboard_capacity,
+            "threshold_score_bytes": threshold.map(hex::encode),
+        })));
+    }
+
     let count = state.store.leaderboard_count(n).await?;
     let threshold = state.store.leaderboard_threshold(n).await?;
+
+    // Cache the result
+    state.cache.set_threshold(n, count, threshold.clone()).await;
+
     Ok(Json(json!({
         "n": n,
         "count": count,
@@ -98,7 +112,7 @@ pub struct CidParams {
     pub since: Option<String>,
 }
 
-/// GET /api/leaderboards/:n/cids — incremental CID sync.
+/// GET /api/leaderboards/:n/cids — incremental CID sync (cached for full sync).
 pub async fn get_cids(
     State(state): State<AppState>,
     Path(n): Path<i32>,
@@ -110,16 +124,33 @@ pub async fn get_cids(
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&chrono::Utc));
 
+    // Only cache full syncs (no `since` param) — incremental syncs are cheap
+    if since.is_none()
+        && let Some(cids) = state.cache.get_cids(n).await
+    {
+        return Ok(Json(json!({ "cids": cids })));
+    }
+
     let cids = state.store.get_leaderboard_cids(n, since).await?;
+
+    if since.is_none() {
+        state.cache.set_cids(n, cids.clone()).await;
+    }
+
     Ok(Json(json!({ "cids": cids })))
 }
 
-/// GET /api/leaderboards/:n/graphs — batch graph6 download.
+/// GET /api/leaderboards/:n/graphs — batch graph6 download (cached).
 pub async fn get_graphs(
     State(state): State<AppState>,
     Path(n): Path<i32>,
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Value>, ApiError> {
+    // Check cache first
+    if let Some(cached) = state.cache.get_graphs(n, params.limit, params.offset).await {
+        return Ok(Json(cached));
+    }
+
     let graphs = state
         .store
         .get_leaderboard_graphs(n, params.limit, params.offset)
@@ -134,5 +165,13 @@ pub async fn get_graphs(
             })
         })
         .collect();
-    Ok(Json(json!({ "graphs": result })))
+    let response = json!({ "graphs": result });
+
+    // Cache the result
+    state
+        .cache
+        .set_graphs(n, params.limit, params.offset, response.clone())
+        .await;
+
+    Ok(Json(response))
 }

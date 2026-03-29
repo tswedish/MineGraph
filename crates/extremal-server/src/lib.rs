@@ -2,6 +2,7 @@
 //!
 //! Pure REST API — no static file serving. Web UIs are separate apps.
 
+pub mod cache;
 pub mod error;
 pub mod handlers;
 pub mod state;
