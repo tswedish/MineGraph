@@ -60,6 +60,26 @@ The operator can drop `.md` files here to send you messages between cycles. If y
 includes an "Operator Messages" section, address those messages FIRST in your response and
 actions. The orchestrator moves processed files to `inbox/processed/` automatically.
 
+**IMPORTANT: Inbox messages are one-shot.** You only see each message once — future cycles
+have no memory of it. When you receive an inbox message:
+1. **Read and understand** the operator's intent
+2. **Synthesize** your own judgment — do you agree? What's actionable? What needs nuance?
+3. **Write a finding** to `experiments/agent/findings.json` capturing your synthesis (not
+   a copy of the message, but your informed take on it)
+4. **Act** on whatever is immediately actionable
+5. **Report** in your cycle output what you learned and what you persisted
+
+### Findings (`experiments/agent/findings.json`)
+
+This is your persistent memory across cycles. Read it at the start of each cycle to maintain
+context. Write to it when you learn something that should inform future decisions.
+
+**When to read**: Every cycle. Skim for entries relevant to current fleet state.
+**When to write**: After inbox messages, after experiments confirm/refute a hypothesis,
+after discovering a surprising result.
+**What to write**: Synthesized knowledge, not raw data. "beam_width=200 outperformed 100
+by 3x on discovery rate in the first 20 minutes" — not a copy of log lines.
+
 ### Strategy Registry (`strategies.json`)
 
 The registry is shared between the experiment skill and the strategy-research skill:
@@ -138,6 +158,20 @@ curl -sf https://api.extremal.online/api/leaderboards/25/export
 - **ALWAYS use `--max-time 10` on ALL curl calls to worker APIs** — config/status/pause/resume endpoints block until the current round finishes, which can be 5-20+ minutes with ILS. The config is queued server-side even if curl times out, so do NOT retry or wait.
 - **Worker API ports** are in the agent-status.sh output, or query: `curl -sf http://localhost:4000/api/workers`
 - **beam_width=150 + noise_flips=2 + sample_bias=0.4** was the clear winner in production experiments (19 admits/min vs 0.2-6.7 for other configs).
+
+**Tuning (post polish-optimization 2026-03-30):**
+- Rounds are now ~170x faster due to polish capping (5 walks/depth) and deferred canonical_form.
+- **Increase search params** to maximize productive search vs per-round overhead: `max_iters=500000`, `beam_width=150`, `max_depth=15`. At 100k iters, only ~35% of wall time is actual search.
+- `max_polish_per_depth` defaults to 5 (adjustable at runtime). Set to 0 for unlimited (old behavior).
+- Post-search scoring is capped at 200 discoveries per round to avoid spending more time scoring than searching.
+
+**Local convergence benchmarking:**
+- Each worker's local discovery history (best graphs found over time) is a useful optimization signal independent of production leaderboard saturation.
+- **Mini-experiments**: Compare how fast different configs improve their local best score in the first 10-20 minutes. Faster local convergence = more efficient search.
+- **Track per worker**: time-to-first-valid, local best score at 5/10/30 min marks, discovery rate curve over time.
+- **Use for A/B testing**: Run 2 workers with different configs, compare local convergence curves. The steeper curve is the better searcher.
+- **Caveat**: Local convergence measures search efficiency, not absolute quality. Always validate that local improvements translate to production admits.
+- Log mini-experiment findings to journal with tag "LOCAL-BENCHMARK".
 
 ## Decide Phase
 
