@@ -99,8 +99,26 @@
       "commit": "pending",
       "notes": "Addresses tree2 exhaustion finding. Uses carry_state pool to accumulate valid graphs for future crossover parents. First round uses perturbed init_graph as parent B. Select via --strategy crossover. 5 new tests passing (R(3,3)/n=5, R(4,4)/n=17, observer, carry_state, pool reuse)."
     }
+    ,{
+      "id": "polish-2opt",
+      "type": "code_change",
+      "description": "2-opt paired edge flips in polish: when the tabu walk stalls (10 steps without best-score improvement), also evaluate pairs of edges that individually violate validity but combined preserve it. Expands the reachable neighborhood beyond single-flip connectivity to escape quality basins that exhaust single flips.",
+      "files": ["crates/extremal-strategies/src/polish.rs", "crates/extremal-strategies/src/tree2.rs", "crates/extremal-strategies/src/crossover.rs", "crates/extremal-strategies/src/tabu.rs", "crates/extremal-worker/src/main.rs"],
+      "params": {"polish_2opt": true},
+      "status": "untested",
+      "date_implemented": "2026-03-30",
+      "commit": "pending",
+      "notes": "Backward compatible (polish_2opt=false default). Enable via --polish-2opt=true. Overhead: ~2ms/step when stalled (vs ~10μs for 1-opt). Only activates after 10 steps without improvement. Addresses tree2+crossover exhaustion at 4c=(67,67) ceiling. 3 new tests passing (2-opt validity, ILS with 2-opt, zero-restarts equivalence). Available in tree2, crossover, and tabu strategies."
+    }
   ],
   "ideas": [
+    {
+      "id": "polish-2opt-config",
+      "description": "Config preset: wide-a base + polish_2opt=true. Tests whether 2-opt paired flips break through the 4c=(67,67) quality ceiling.",
+      "priority": "high",
+      "rationale": "Direct test of 2-opt's ability to find graphs unreachable by single-flip polish. Run A/B: wide-a with 2-opt vs wide-a without.",
+      "estimated_effort": "none — just config, code already implemented"
+    },
     {
       "id": "ils-polish-config",
       "description": "Config preset: wide-a base + ILS restarts=3, perturb=3. Tests whether ILS improves scoring quality on top of the best-performing config.",
@@ -135,13 +153,6 @@
       "priority": "low",
       "rationale": "SA can accept worsening moves (unlike tree2). But basic SA in experiments crate was untuned. Hybrid could work.",
       "estimated_effort": "medium — new strategy, ~200 LOC"
-    },
-    {
-      "id": "multi-flip-perturbation",
-      "description": "Instead of single-edge flips, try k-edge swaps (flip k edges simultaneously). Enables tunneling through barriers.",
-      "priority": "low",
-      "rationale": "Single flips may not reach some valid graphs. Multi-flip could jump between disconnected valid-graph basins.",
-      "estimated_effort": "high — changes to core search loop"
     },
     {
       "id": "gpu-clique-counting",

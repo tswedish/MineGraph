@@ -102,6 +102,15 @@ impl SearchStrategy for CrossoverSearch {
                 adjustable: true,
             },
             ConfigParam {
+                name: "polish_2opt".into(),
+                label: "Polish 2-opt".into(),
+                description: "Enable paired edge flips in polish to escape single-flip basins"
+                    .into(),
+                param_type: ParamType::Bool,
+                default: serde_json::json!(false),
+                adjustable: true,
+            },
+            ConfigParam {
                 name: "target_k".into(),
                 label: "Target K".into(),
                 description: "Clique size to minimize in graph (red)".into(),
@@ -161,6 +170,11 @@ impl SearchStrategy for CrossoverSearch {
             .get("target_ell")
             .and_then(|v| v.as_u64())
             .unwrap_or(5) as u32;
+        let polish_2opt = job
+            .config
+            .get("polish_2opt")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let n = job.n;
         let max_iters = job.max_iters;
@@ -250,6 +264,7 @@ impl SearchStrategy for CrossoverSearch {
                     ell,
                     polish_max_steps,
                     polish_tabu_tenure,
+                    polish_2opt,
                     &mut known_cids,
                     observer,
                     total_iters,
@@ -368,6 +383,7 @@ impl SearchStrategy for CrossoverSearch {
                             ell,
                             polish_max_steps,
                             polish_tabu_tenure,
+                            polish_2opt,
                             &mut known_cids,
                             observer,
                             total_iters + iter,
@@ -450,6 +466,7 @@ fn handle_valid(
     ell: u32,
     polish_max_steps: u32,
     polish_tabu_tenure: u32,
+    polish_2opt: bool,
     known_cids: &mut HashSet<extremal_types::GraphCid>,
     observer: &dyn SearchObserver,
     iteration: u64,
@@ -480,6 +497,7 @@ fn handle_valid(
             ell,
             polish_max_steps,
             polish_tabu_tenure,
+            polish_2opt,
             known_cids,
             observer,
             iteration,

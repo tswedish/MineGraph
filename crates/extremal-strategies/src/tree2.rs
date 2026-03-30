@@ -175,6 +175,15 @@ impl SearchStrategy for Tree2Search {
                 adjustable: true,
             },
             ConfigParam {
+                name: "polish_2opt".into(),
+                label: "Polish 2-opt".into(),
+                description: "Enable paired edge flips in polish to escape single-flip basins"
+                    .into(),
+                param_type: ParamType::Bool,
+                default: serde_json::json!(false),
+                adjustable: true,
+            },
+            ConfigParam {
                 name: "max_polish_per_depth".into(),
                 label: "Max Polish Per Depth".into(),
                 description: "Cap polish walks per beam depth level (0=unlimited)".into(),
@@ -236,6 +245,11 @@ impl SearchStrategy for Tree2Search {
             .get("polish_ils_perturb")
             .and_then(|v| v.as_u64())
             .unwrap_or(3) as u32;
+        let polish_2opt = job
+            .config
+            .get("polish_2opt")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let max_polish_per_depth = job
             .config
             .get("max_polish_per_depth")
@@ -438,6 +452,7 @@ impl SearchStrategy for Tree2Search {
                                     ell,
                                     polish_max_steps,
                                     polish_tabu_tenure,
+                                    polish_2opt,
                                     polish_ils_restarts,
                                     polish_ils_perturb,
                                     &mut known_cids,

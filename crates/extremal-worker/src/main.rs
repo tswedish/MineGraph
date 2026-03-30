@@ -110,6 +110,10 @@ struct Cli {
     /// ILS perturbation edges: random valid-preserving flips between polish walks.
     #[arg(long, default_value = "3")]
     polish_ils_perturb: u64,
+
+    /// Enable 2-opt paired edge flips in polish (escapes single-flip basins).
+    #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
+    polish_2opt: bool,
 }
 
 #[tokio::main]
@@ -169,6 +173,7 @@ async fn main() {
         "score_bias_threshold": cli.score_bias_threshold,
         "polish_ils_restarts": cli.polish_ils_restarts,
         "polish_ils_perturb": cli.polish_ils_perturb,
+        "polish_2opt": cli.polish_2opt,
     });
 
     // Parse metadata JSON
