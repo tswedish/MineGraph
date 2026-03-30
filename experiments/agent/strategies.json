@@ -131,6 +131,17 @@
       "date_implemented": "2026-03-30",
       "commit": "7c0f5f7",
       "notes": "Addresses the comprehensive 4c>=67 barrier. Key difference from all other strategies: does NOT use Paley/leaderboard seeds. Builds graphs edge-by-edge with greedy violation minimization, then tabu-repairs near-valid results. Select via --strategy construct. CLI flags: --repair-max-iters, --repair-threshold. 5 tests passing (R(3,3)/n=5, R(4,4)/n=17, observer, init_graph ignored, seed diversity). Polish integrated (capped at 20/round). Recommended fleet test: 4-8 workers with --strategy construct --repair-threshold 15 --repair-max-iters 20000 --max-iters 500000."
+    },
+    {
+      "id": "circulant",
+      "type": "code_change",
+      "description": "Circulant graph enumeration: exhaustively searches all 2^⌊n/2⌋ circulant graphs C(n, S) for R(k,ℓ) validity. Algebraically structured subspace completely different from Paley perturbation. Circulant graphs are vertex-transitive (|Aut| ≥ n) for direct scoring advantage. One-round exhaustive search (4096 graphs for n=25) with polish on valid discoveries.",
+      "files": ["crates/extremal-strategies/src/circulant.rs", "crates/extremal-strategies/src/lib.rs"],
+      "params": {"polish_max_steps": 100, "polish_tabu_tenure": 25},
+      "status": "untested",
+      "date_implemented": "2026-03-30",
+      "commit": "79650f5",
+      "notes": "Fundamentally different approach: algebraic enumeration, not heuristic search. Uses carry_state to skip after first round. Select via --strategy circulant. 7 tests passing (R(3,3)/n=5, R(4,4)/n=17, build correctness x3, carry_state, dedup). Recommended test: single worker with --strategy circulant --n 25 --max-iters 1000000. Completes in one round (~seconds for validity check, longer if many valid graphs found and polished)."
     }
   ],
   "ideas": [
@@ -175,6 +186,13 @@
       "priority": "low",
       "rationale": "GPU NOT worthwhile for n=25 (violation_delta=33.6ns, GPU launch=5-10μs). Only revisit for n=40+.",
       "estimated_effort": "high — CUDA FFI or wgpu compute shader, significant engineering"
+    },
+    {
+      "id": "circulant-seeds-for-tree2",
+      "description": "Use valid circulant graphs found by circulant enumeration as alternative seeds for tree2 beam search. Different seed structure may lead to different 4-clique basins.",
+      "priority": "medium",
+      "rationale": "If circulant enumeration finds valid R(5,5) circulant graphs on n=25, they have fundamentally different structure from Paley-derived seeds. tree2 beam search from these seeds might explore different neighborhoods. Requires circulant strategy to find valid graphs first.",
+      "estimated_effort": "low — engine init_graph selection + config"
     },
     {
       "id": "scale-workers-16",
