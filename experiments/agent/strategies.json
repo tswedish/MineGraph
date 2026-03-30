@@ -164,6 +164,17 @@
       "date_implemented": "2026-03-30",
       "commit": "df18142",
       "notes": "Fundamentally different algebraic subspace from circulant strategy. Z_5×Z_5 ≠ Z_25 — different automorphism structure, different graph families. The Paley graph P(25) is a Cayley graph of GF(25)≅Z_5×Z_5 over quadratic residues, so this space contains it plus 4095 alternatives. Select via --strategy cayley. 11 tests passing (prime_sqrt, pair enumeration x3, build correctness x2, R(3,3)/n=4, R(4,4)/n=9, non-p² skip, carry_state x2). Recommended test: single worker with --strategy cayley --n 25. Completes in one round (~seconds). Supports n=4,9,25 (p=2,3,5); n=49 (p=7, 16M graphs) skipped as too large."
+    },
+    {
+      "id": "relink",
+      "type": "code_change",
+      "description": "Path relinking: systematically walks between pairs of elite leaderboard graphs, discovering valid intermediates along each corridor. Accumulates a pool of diverse seeds over rounds, then relinks each pair (forward + backward). Allows brief traversal through 1-2 violation states to tunnel between basins. Fundamentally different from all local-search methods: guided moves toward a known-good target instead of random/greedy neighborhoods.",
+      "files": ["crates/extremal-strategies/src/relink.rs", "crates/extremal-strategies/src/lib.rs", "crates/extremal-worker/src/main.rs"],
+      "params": {"pool_capacity": 50, "max_violations": 2, "polish_max_steps": 100, "polish_tabu_tenure": 25},
+      "status": "untested",
+      "date_implemented": "2026-03-30",
+      "commit": "b8beb3e",
+      "notes": "Addresses the comprehensive 4c>=67 barrier via corridor exploration between known-good solutions. Select via --strategy relink. CLI flags: --pool-capacity (default 50), --max-violations (default 2). 6 tests passing (pool accumulation, two-graph start, valid intermediates, carry_state, budget, R(4,4)/n=17). Pool accumulates over first ~2 rounds, then starts relinking. Recommended test: 2-4 workers with --strategy relink --n 25 --max-violations 2 --pool-capacity 50. Needs several rounds to build pool from leaderboard seeds."
     }
   ],
   "ideas": [
@@ -236,6 +247,13 @@
       "priority": "high",
       "rationale": "On saturated leaderboards, more compute = more chances to find rare better graphs. Check CPU headroom first. Zero code changes needed.",
       "estimated_effort": "none — just --workers 16"
+    },
+    {
+      "id": "relink-config-tuning",
+      "description": "Tune relink params: pool_capacity (10-100), max_violations (0-5), and test with higher polish (200 steps). Compare pool growth rate and discovery quality vs tree2-wide-a.",
+      "priority": "high",
+      "rationale": "Relink implemented but untested in fleet. Key tradeoff: max_violations=0 (strict validity) finds fewer intermediates but guarantees quality; max_violations=2-5 tunnels through invalid states for broader exploration. Pool needs ~5-10 rounds to saturate from leaderboard diversity.",
+      "estimated_effort": "none — config only"
     }
   ]
 }
