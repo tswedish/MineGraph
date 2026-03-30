@@ -18,6 +18,7 @@ pub mod gradient;
 pub mod init;
 pub mod lns;
 pub mod polish;
+pub mod refine;
 pub mod relink;
 pub mod sa;
 pub mod seidel;
@@ -40,5 +41,6 @@ pub fn default_strategies() -> Vec<Box<dyn SearchStrategy>> {
         Box::new(relink::RelinkSearch),
         Box::new(gradient::GradientDescent),
         Box::new(seidel::SeidelSearch),
+        Box::new(refine::RefineSearch),
     ]
 }
