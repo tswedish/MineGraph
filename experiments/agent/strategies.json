@@ -182,13 +182,33 @@
       "description": "Two-phase gradient descent: Phase 1 greedily minimizes max(red_4c, blue_4c) via directed edge flips ignoring violations entirely, Phase 2 repairs violations via tabu search. Key difference from SA: directed moves (always picks BEST edge per step) rather than random moves with probabilistic acceptance. Phase separation ensures full-commitment 4c descent before repair, potentially reaching different validity basins.",
       "files": ["crates/extremal-strategies/src/gradient.rs", "crates/extremal-strategies/src/lib.rs", "crates/extremal-worker/src/main.rs"],
       "params": {"gradient_descent_steps": 200, "gradient_repair_steps": 5000, "gradient_tabu_tenure": 25, "gradient_perturb_flips": 5, "polish_max_steps": 100, "polish_tabu_tenure": 25},
-      "status": "untested",
+      "status": "exhausted",
+      "metrics": {"total_rounds": 1738, "total_discoveries": 0, "total_admitted": 0, "round_ms_avg": 4516, "skip_thr": 200},
+      "date_tested": "2026-03-30",
       "date_implemented": "2026-03-30",
       "commit": "67a6ce3",
       "notes": "Addresses 4c>=67 barrier from a new angle: directed descent pushes max(4c) far below 67 (at cost of validity), then repair re-establishes validity possibly in a different basin. Select via --strategy gradient. CLI flags: --gradient-descent-steps, --gradient-repair-steps, --gradient-tabu-tenure, --gradient-perturb-flips. 4 tests passing (R(3,3)/n=5, R(4,4)/n=17, discovery reporting, multi-trial). Recommended test: 4-8 workers with --strategy gradient --n 25 --gradient-descent-steps 200 --gradient-repair-steps 5000 --max-iters 500000. Also try varied descent depths (50-500) and perturb_flips (3-10)."
+    },
+    {
+      "id": "seidel",
+      "type": "code_change",
+      "description": "Seidel switching search: applies structured multi-edge perturbations (flipping ALL edges between a vertex subset S and V\\S) to explore graph space algebraically. Two phases: exhaustive enumeration of small switching sets (size 1-3), then random switching compositions. Fundamentally different from all local-search methods — produces O(n) correlated edge changes at once.",
+      "files": ["crates/extremal-strategies/src/seidel.rs", "crates/extremal-strategies/src/lib.rs", "crates/extremal-worker/src/main.rs"],
+      "params": {"max_switch_size": 3, "random_compositions": 5000, "polish_max_steps": 100, "polish_tabu_tenure": 25},
+      "status": "untested",
+      "date_implemented": "2026-03-30",
+      "commit": "4005727",
+      "notes": "11th strategy. Well-known operation in two-graph theory / Ramsey research. Switching preserves the switching equivalence class. For n=25: size 1-3 exhaustive = 2625 switchings per seed, plus 5000 random compositions. Select via --strategy seidel. CLI flags: --seidel-max-switch-size, --seidel-random-compositions. 8 tests passing (involution, edge changes, identity, R(3,3)/n=5, R(4,4)/n=17, no-init, discovery, random subset). Recommended test: 4-8 workers with --strategy seidel --n 25 --seidel-max-switch-size 3 --seidel-random-compositions 10000 --max-iters 500000."
     }
   ],
   "ideas": [
+    {
+      "id": "seidel-config-tuning",
+      "description": "Tune Seidel params: max_switch_size (2-5), random_compositions (1k-50k), and test with different seeds (top-1 vs random leaderboard). Also try size-4 exhaustive (12650 switchings per seed) and pure-random mode (no exhaustive phase, just compositions).",
+      "priority": "high",
+      "rationale": "Seidel implemented but untested. Key tradeoff: larger switching sets produce more diverse graphs but are more likely to break validity. Compositions of two switchings explore deeper neighborhoods. Need to determine if Seidel-switched graphs can escape the 4c>=67 barrier.",
+      "estimated_effort": "none — config only"
+    },
     {
       "id": "cayley-seeds-for-tree2",
       "description": "Use valid Cayley Z_5×Z_5 graphs as alternative seeds for tree2 beam search. Different algebraic structure may lead to different 4-clique basins than Paley-perturbed seeds.",
