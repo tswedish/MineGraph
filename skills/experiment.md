@@ -134,7 +134,8 @@ curl -sf https://api.extremal.online/api/leaderboards/25/export
 - **Polish debug logs require RUST_LOG=debug** — at info level, use worker HTTP API `/api/status` for metrics instead.
 - **Dashboard shows only 1 worker per worker_id** — always use unique worker_ids in metadata.
 - **Threshold gating is aggressive on full leaderboards** — hundreds of thousands of graphs skipped. This is normal and expected.
-- **Use direct HTTP API for config changes, NOT the CLI `workers set` command** — the CLI discovers workers via relay and times out. Instead: `curl -sf -X POST http://localhost:$PORT/api/config -H "Content-Type: application/json" -d '{"param": value}'`
+- **Use direct HTTP API for config changes, NOT the CLI `workers set` command** — the CLI discovers workers via relay and times out. Instead: `curl -sf --max-time 10 -X POST http://localhost:$PORT/api/config -H "Content-Type: application/json" -d '{"param": value}'`
+- **ALWAYS use `--max-time 10` on ALL curl calls to worker APIs** — config/status/pause/resume endpoints block until the current round finishes, which can be 5-20+ minutes with ILS. The config is queued server-side even if curl times out, so do NOT retry or wait.
 - **Worker API ports** are in the agent-status.sh output, or query: `curl -sf http://localhost:4000/api/workers`
 - **beam_width=150 + noise_flips=2 + sample_bias=0.4** was the clear winner in production experiments (19 admits/min vs 0.2-6.7 for other configs).
 
@@ -170,25 +171,29 @@ curl -sf https://api.extremal.online/api/leaderboards/25/export
 
 IMPORTANT: Always use the direct worker HTTP API, not the CLI `workers set` command (it times out).
 
+CRITICAL: Worker config POST endpoints BLOCK until the current round finishes (can be 5-20+ minutes with ILS polish). ALWAYS use `--max-time 10` on curl commands to avoid blocking. The config change is queued on the server side even if curl times out — you do NOT need to wait for a response.
+
 ```bash
 # 1. Find worker API ports from dashboard relay
-curl -sf http://localhost:4000/api/workers | python3 -c "
+curl -sf --max-time 5 http://localhost:4000/api/workers | python3 -c "
 import json, sys
 for w in json.load(sys.stdin)['workers']:
     print(f'{w[\"worker_id\"]}: {w[\"api_addr\"]}')"
 
 # 2. Adjust params via direct HTTP POST (takes effect next round)
-curl -sf -X POST http://localhost:$PORT/api/config \
+# ALWAYS use --max-time 10 — the request blocks until round ends!
+curl -sf --max-time 10 -X POST http://localhost:$PORT/api/config \
   -H "Content-Type: application/json" \
   -d '{"beam_width": 150, "noise_flips": 2, "sample_bias": 0.4}'
+# Config is queued even if this times out — do NOT retry.
 
-# 3. Check current config
-curl -sf http://localhost:$PORT/api/config | python3 -m json.tool
+# 3. Check current config (also blocks until round boundary)
+curl -sf --max-time 10 http://localhost:$PORT/api/config | python3 -m json.tool
 
-# 4. Pause/resume/stop
-curl -sf -X POST http://localhost:$PORT/api/pause
-curl -sf -X POST http://localhost:$PORT/api/resume
-curl -sf -X POST http://localhost:$PORT/api/stop
+# 4. Pause/resume/stop (also blocks)
+curl -sf --max-time 10 -X POST http://localhost:$PORT/api/pause
+curl -sf --max-time 10 -X POST http://localhost:$PORT/api/resume
+curl -sf --max-time 10 -X POST http://localhost:$PORT/api/stop
 ```
 
 ### Take snapshot
