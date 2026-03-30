@@ -142,6 +142,22 @@ struct Cli {
     /// Relink: max violations allowed during path traversal (0 = strict validity).
     #[arg(long, default_value = "2")]
     max_violations: u64,
+
+    /// Gradient: max steps in 4c descent phase.
+    #[arg(long, default_value = "200")]
+    gradient_descent_steps: u64,
+
+    /// Gradient: max steps in violation repair phase.
+    #[arg(long, default_value = "5000")]
+    gradient_repair_steps: u64,
+
+    /// Gradient: tabu tenure during descent/repair.
+    #[arg(long, default_value = "25")]
+    gradient_tabu_tenure: u64,
+
+    /// Gradient: random edge flips between trials.
+    #[arg(long, default_value = "5")]
+    gradient_perturb_flips: u64,
 }
 
 #[tokio::main]
@@ -209,6 +225,10 @@ async fn main() {
         "lns_block_size": cli.lns_block_size,
         "pool_capacity": cli.pool_capacity,
         "max_violations": cli.max_violations,
+        "gradient_descent_steps": cli.gradient_descent_steps,
+        "gradient_repair_steps": cli.gradient_repair_steps,
+        "gradient_tabu_tenure": cli.gradient_tabu_tenure,
+        "gradient_perturb_flips": cli.gradient_perturb_flips,
     });
 
     // Parse metadata JSON

@@ -14,6 +14,7 @@ pub mod cayley;
 pub mod circulant;
 pub mod construct;
 pub mod crossover;
+pub mod gradient;
 pub mod init;
 pub mod lns;
 pub mod polish;
@@ -36,5 +37,6 @@ pub fn default_strategies() -> Vec<Box<dyn SearchStrategy>> {
         Box::new(cayley::CayleySearch),
         Box::new(lns::LnsSearch),
         Box::new(relink::RelinkSearch),
+        Box::new(gradient::GradientDescent),
     ]
 }
