@@ -35,7 +35,8 @@ EXPERIMENT_INTERVAL="10m"
 EXPERIMENT_CYCLES=12  # how many experiment cycles before re-evaluating (~2 hours)
 RESEARCH_BUDGET="5.00"
 EXPERIMENT_BUDGET="1.50"
-MODEL="opus"
+RESEARCH_MODEL="opus"
+EXPERIMENT_MODEL="sonnet"
 
 # ── Parse args ───────────────────────────────────────────
 PASSTHROUGH_ARGS=()
@@ -48,7 +49,9 @@ while [[ $# -gt 0 ]]; do
         --polish)      POLISH="$2"; PASSTHROUGH_ARGS+=("$1" "$2"); shift 2 ;;
         --interval)    EXPERIMENT_INTERVAL="$2"; PASSTHROUGH_ARGS+=("$1" "$2"); shift 2 ;;
         --cycles)      EXPERIMENT_CYCLES="$2"; shift 2 ;;
-        --model)       MODEL="$2"; shift 2 ;;
+        --model)       RESEARCH_MODEL="$2"; EXPERIMENT_MODEL="$2"; shift 2 ;;
+        --experiment-model) EXPERIMENT_MODEL="$2"; shift 2 ;;
+        --research-model)   RESEARCH_MODEL="$2"; shift 2 ;;
         *)             PASSTHROUGH_ARGS+=("$1"); shift ;;
     esac
 done
@@ -66,7 +69,7 @@ echo "╠═══════════════════════�
 echo "║  server:   $SERVER"
 echo "║  branch:   $BRANCH ($COMMIT)"
 echo "║  mode:     $MODE"
-echo "║  model:    $MODEL"
+echo "║  models:   research=$RESEARCH_MODEL experiment=$EXPERIMENT_MODEL"
 echo "║  logs:     $LOG_DIR"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
@@ -191,12 +194,12 @@ RESEARCH_EOF
             if timeout "$CLAUDE_TIMEOUT" bash -c 'echo "$1" | claude \
                 --print \
                 --model "$2" \
-                --effort max \
+                --effort high \
                 --append-system-prompt-file "skills/strategy-research.md" \
                 --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
                 --max-budget-usd "$3" \
                 --no-session-persistence' \
-                _ "$RESEARCH_PROMPT" "$MODEL" "$RESEARCH_BUDGET" \
+                _ "$RESEARCH_PROMPT" "$RESEARCH_MODEL" "$RESEARCH_BUDGET" \
                 2>&1 | tee "$LOG_DIR/research-$ROUND.log"; then
                 RESEARCH_OK=true
                 echo "  [$(date '+%H:%M:%S')] Research attempt $ATTEMPT succeeded."
@@ -350,12 +353,12 @@ EXPERIMENT_EOF
                 if timeout "$CLAUDE_TIMEOUT" bash -c 'echo "$1" | claude \
                     --print \
                     --model "$2" \
-                    --effort max \
+                    --effort high \
                     --append-system-prompt-file "skills/experiment.md" \
                     --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
                     --max-budget-usd "$3" \
                     --no-session-persistence' \
-                    _ "$EXPERIMENT_PROMPT" "$MODEL" "$EXPERIMENT_BUDGET" \
+                    _ "$EXPERIMENT_PROMPT" "$EXPERIMENT_MODEL" "$EXPERIMENT_BUDGET" \
                     2>&1 | tee "$LOG_DIR/experiment-${ROUND}-${CYCLE}.log"; then
                     CYCLE_OK=true
                     echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE attempt $ATTEMPT succeeded."

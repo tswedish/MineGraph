@@ -31,7 +31,7 @@ WORKERS=8
 POLISH=100
 INTERVAL="10m"
 BUDGET="1.50"
-MODEL="opus"
+MODEL="sonnet"
 LAUNCH_FLEET=true
 FLEET_PIDS=""
 CLAUDE_TIMEOUT=1200  # 20 min max per claude invocation
@@ -305,7 +305,7 @@ PROMPT_EOF
         if timeout "$CLAUDE_TIMEOUT" bash -c 'echo "$1" | claude \
             --print \
             --model "$2" \
-            --effort max \
+            --effort high \
             --append-system-prompt-file "skills/experiment.md" \
             --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
             --max-budget-usd "$3" \

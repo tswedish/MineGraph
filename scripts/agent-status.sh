@@ -49,28 +49,40 @@ echo ""
 
 # ── Recent Leaderboard Activity ──────────────────────────
 echo "--- Recent Leaderboard Activity ---"
-curl -sf --max-time 5 "$SERVER/api/leaderboards/$N?limit=10" 2>/dev/null | python3 -c "
+curl -sf --max-time 10 "$SERVER/api/leaderboards/$N?limit=500" 2>/dev/null | python3 -c "
 import json, sys
 from datetime import datetime, timezone
 try:
     data = json.load(sys.stdin)
     entries = data['entries']
-    # Find most recent admission
-    if entries:
-        latest = entries[0]
-        t = datetime.fromisoformat(latest['admitted_at'].replace('+00:00', '+00:00'))
-        now = datetime.now(timezone.utc)
-        age = now - t
-        hours = age.total_seconds() / 3600
-        if hours < 1:
-            age_str = f'{int(age.total_seconds() / 60)}m ago'
-        elif hours < 24:
-            age_str = f'{hours:.1f}h ago'
-        else:
-            age_str = f'{hours/24:.1f}d ago'
-        print(f'  Most recent admission: {latest[\"admitted_at\"][:19]} ({age_str})')
-    # Check bottom of board too
-except: print('  (unavailable)')
+    if not entries:
+        print('  (empty)')
+        sys.exit(0)
+    # Find most recent admissions by date (not by rank)
+    entries.sort(key=lambda e: e['admitted_at'], reverse=True)
+    now = datetime.now(timezone.utc)
+    def age_str(t_str):
+        t = datetime.fromisoformat(t_str)
+        hours = (now - t).total_seconds() / 3600
+        if hours < 1: return f'{int((now-t).total_seconds()/60)}m ago'
+        elif hours < 24: return f'{hours:.1f}h ago'
+        else: return f'{hours/24:.1f}d ago'
+    latest = entries[0]
+    print(f'  Most recent admission: {latest[\"admitted_at\"][:19]} ({age_str(latest[\"admitted_at\"])}), rank #{latest[\"rank\"]}')
+    # Show last 5 admissions
+    for e in entries[:5]:
+        h = e['histogram']
+        tiers = {t['k']: (t['red'], t['blue']) for t in h['tiers']}
+        c4 = tiers.get(4, (0,0))
+        print(f'    #{e[\"rank\"]}: 4c=({c4[0]},{c4[1]}) gap={e[\"goodman_gap\"]} ({age_str(e[\"admitted_at\"])})')
+    # Count admissions by day
+    from collections import Counter
+    by_day = Counter(e['admitted_at'][:10] for e in entries)
+    recent_days = sorted(by_day.items(), reverse=True)[:5]
+    print(f'  Admissions by day:')
+    for day, count in recent_days:
+        print(f'    {day}: {count} entries')
+except Exception as ex: print(f'  (error: {ex})')
 " 2>/dev/null || echo "  (server unreachable)"
 
 # Check bottom of board for threshold context
