@@ -166,6 +166,10 @@ struct Cli {
     /// Seidel: number of random switching compositions per round.
     #[arg(long, default_value = "5000")]
     seidel_random_compositions: u64,
+
+    /// Template: min unique seeds to build template.
+    #[arg(long, default_value = "3")]
+    template_pool_size: u64,
 }
 
 #[tokio::main]
@@ -239,6 +243,7 @@ async fn main() {
         "gradient_perturb_flips": cli.gradient_perturb_flips,
         "max_switch_size": cli.seidel_max_switch_size,
         "random_compositions": cli.seidel_random_compositions,
+        "template_pool_size": cli.template_pool_size,
     });
 
     // Parse metadata JSON

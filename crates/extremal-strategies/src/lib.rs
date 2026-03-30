@@ -23,6 +23,7 @@ pub mod relink;
 pub mod sa;
 pub mod seidel;
 pub mod tabu;
+pub mod template;
 pub mod tree2;
 
 use extremal_worker_api::SearchStrategy;
@@ -42,5 +43,6 @@ pub fn default_strategies() -> Vec<Box<dyn SearchStrategy>> {
         Box::new(gradient::GradientDescent),
         Box::new(seidel::SeidelSearch),
         Box::new(refine::RefineSearch),
+        Box::new(template::TemplateSearch),
     ]
 }
