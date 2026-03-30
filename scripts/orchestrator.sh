@@ -118,13 +118,19 @@ try:
 except:
     pass
 
+# Check for explicit signal file from agent
+signal = os.path.exists('experiments/agent/signal-research')
+
 # Decision logic:
+# 0. If agent explicitly signaled research → research
 # 1. If untested strategies exist → experiment (test them)
 # 2. If experiments are plateauing and there are high-priority ideas → research
-# 3. If no ideas left → experiment (keep running best config)
+# 3. If no ideas left → research (need new ideas)
 # 4. Default: experiment (collecting data is usually more valuable)
 
-if untested:
+if signal:
+    print('research')
+elif untested:
     print('experiment')
 elif plateau and high_ideas:
     print('research')
@@ -137,6 +143,7 @@ else:
 
 # ── Main loop ────────────────────────────────────────────
 ROUND=0
+FORCE_RESEARCH=false
 while true; do
     ROUND=$((ROUND + 1))
     COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -148,7 +155,10 @@ while true; do
     echo "╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍"
 
     # Decide mode
-    if [[ "$MODE" == "auto" ]]; then
+    if [[ "$FORCE_RESEARCH" == "true" ]]; then
+        CHOSEN="research"
+        FORCE_RESEARCH=false
+    elif [[ "$MODE" == "auto" ]]; then
         CHOSEN=$(decide_mode)
     else
         CHOSEN="$MODE"
@@ -233,12 +243,27 @@ RESEARCH_EOF
         # Find the most recent log dir
         FLEET_LOG=$(ls -td logs/agent-* 2>/dev/null | head -1)
 
+        PREV_CYCLE_LOG=""
         for CYCLE in $(seq 1 "$EXPERIMENT_CYCLES"); do
             echo ""
             echo "  ── Experiment Cycle $CYCLE/$EXPERIMENT_CYCLES ──"
 
             STATUS_FILE=$(mktemp)
             ./scripts/agent-status.sh "$FLEET_LOG" > "$STATUS_FILE" 2>&1 || true
+
+            # Build previous cycle context (last cycle's output, truncated)
+            PREV_CYCLE_SECTION=""
+            if [[ -n "$PREV_CYCLE_LOG" && -f "$PREV_CYCLE_LOG" ]]; then
+                PREV_OUTPUT=$(tail -80 "$PREV_CYCLE_LOG" 2>/dev/null || true)
+                if [[ -n "$PREV_OUTPUT" ]]; then
+                    PREV_CYCLE_SECTION="
+## Previous Cycle Output
+This is what you (a previous instance) reported last cycle. Use it for continuity.
+\`\`\`
+$PREV_OUTPUT
+\`\`\`"
+                fi
+            fi
 
             # Collect inbox messages
             INBOX_DIR="experiments/agent/inbox"
@@ -264,6 +289,7 @@ $INBOX_CONTENT"
             EXPERIMENT_PROMPT=$(cat <<EXPERIMENT_EOF
 Run one experiment agent observe-decide-act cycle per the experiment skill protocol.
 $INBOX_SECTION
+$PREV_CYCLE_SECTION
 
 ## Current Fleet Status
 $(cat "$STATUS_FILE")
@@ -349,7 +375,19 @@ EXPERIMENT_EOF
                 echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE failed after 3 attempts, skipping."
             fi
 
+            # Track this cycle's log for next cycle's context
+            PREV_CYCLE_LOG="$LOG_DIR/experiment-${ROUND}-${CYCLE}.log"
+
             rm -f "$STATUS_FILE"
+
+            # Check if agent signaled a switch to research mode
+            if [[ -f "experiments/agent/signal-research" ]]; then
+                echo "  Agent requested strategy-research phase!"
+                cat "experiments/agent/signal-research"
+                rm -f "experiments/agent/signal-research"
+                FORCE_RESEARCH=true
+                break
+            fi
 
             if [[ $CYCLE -lt $EXPERIMENT_CYCLES ]]; then
                 echo "  Next experiment cycle in $EXPERIMENT_INTERVAL..."

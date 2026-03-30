@@ -181,6 +181,7 @@ fi
 
 # ── Observation Loop ─────────────────────────────────────
 CYCLE=0
+PREV_CYCLE_LOG=""
 while true; do
     CYCLE=$((CYCLE + 1))
     NOW=$(date '+%Y-%m-%d %H:%M')
@@ -193,6 +194,20 @@ while true; do
     # Gather current status into a temp file for the prompt
     STATUS_FILE=$(mktemp)
     ./scripts/agent-status.sh "$LOG_DIR" > "$STATUS_FILE" 2>&1 || true
+
+    # Build previous cycle context
+    PREV_CYCLE_SECTION=""
+    if [[ -n "$PREV_CYCLE_LOG" && -f "$PREV_CYCLE_LOG" ]]; then
+        PREV_OUTPUT=$(tail -80 "$PREV_CYCLE_LOG" 2>/dev/null || true)
+        if [[ -n "$PREV_OUTPUT" ]]; then
+            PREV_CYCLE_SECTION="
+## Previous Cycle Output
+This is what you (a previous instance) reported last cycle. Use it for continuity.
+\`\`\`
+$PREV_OUTPUT
+\`\`\`"
+        fi
+    fi
 
     # Collect inbox messages
     INBOX_DIR="experiments/agent/inbox"
@@ -220,6 +235,7 @@ $INBOX_CONTENT"
     PROMPT=$(cat <<PROMPT_EOF
 Run one experiment agent observe-decide-act cycle per the experiment skill protocol.
 $INBOX_SECTION
+$PREV_CYCLE_SECTION
 
 ## Current Fleet Status
 $(cat "$STATUS_FILE")
@@ -313,6 +329,9 @@ PROMPT_EOF
     if [[ "$CYCLE_OK" == "false" ]]; then
         echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE failed after 3 attempts, skipping to next cycle."
     fi
+
+    # Track this cycle's log for next cycle's context
+    PREV_CYCLE_LOG="$LOG_DIR/cycle-$CYCLE.log"
 
     rm -f "$STATUS_FILE"
 

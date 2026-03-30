@@ -173,6 +173,18 @@ curl -sf https://api.extremal.online/api/leaderboards/25/export
 - **Caveat**: Local convergence measures search efficiency, not absolute quality. Always validate that local improvements translate to production admits.
 - Log mini-experiment findings to journal with tag "LOCAL-BENCHMARK".
 
+**Triggering strategy research:**
+- When you conclude the algorithm has hit a hard wall (not just a slow plateau), you can
+  signal the orchestrator to switch to strategy-research mode.
+- **How**: Write a file `experiments/agent/signal-research` with a brief explanation:
+  ```bash
+  echo "Zero admits across 5000+ rounds over 20 hours. tree2 beam search exhausted at 4c>=67 threshold. Need algorithmic changes: crossover, deep tabu, or alternative construction." > experiments/agent/signal-research
+  ```
+- The orchestrator checks for this file between cycles. When found, it stops the experiment
+  phase, kills the fleet, and starts a research phase that can implement new algorithms.
+- **Only signal research when**: parameter tuning is provably spent (multiple sessions,
+  diverse configs, zero progress for hours). NOT after a 30-minute plateau.
+
 ## Decide Phase
 
 ### Autonomous Actions
