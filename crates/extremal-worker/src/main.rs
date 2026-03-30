@@ -130,6 +130,10 @@ struct Cli {
     /// Construct: max violations to attempt repair (0 = only exact valid).
     #[arg(long, default_value = "10")]
     repair_threshold: u64,
+
+    /// LNS: vertices per neighborhood block (4-8). Higher = larger search radius but exponentially more states.
+    #[arg(long, default_value = "6")]
+    lns_block_size: u64,
 }
 
 #[tokio::main]
@@ -194,6 +198,7 @@ async fn main() {
         "sa_violation_weight": cli.sa_violation_weight,
         "repair_max_iters": cli.repair_max_iters,
         "repair_threshold": cli.repair_threshold,
+        "lns_block_size": cli.lns_block_size,
     });
 
     // Parse metadata JSON

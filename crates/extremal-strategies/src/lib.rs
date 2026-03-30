@@ -14,6 +14,7 @@ pub mod circulant;
 pub mod construct;
 pub mod crossover;
 pub mod init;
+pub mod lns;
 pub mod polish;
 pub mod sa;
 pub mod tabu;
@@ -30,5 +31,6 @@ pub fn default_strategies() -> Vec<Box<dyn SearchStrategy>> {
         Box::new(sa::SimulatedAnnealing),
         Box::new(construct::ConstructSearch),
         Box::new(circulant::CirculantSearch),
+        Box::new(lns::LnsSearch),
     ]
 }
