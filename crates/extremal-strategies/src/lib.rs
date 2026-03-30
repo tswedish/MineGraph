@@ -10,6 +10,7 @@
 //! is passed via the strategy config JSON as `target_k` and `target_ell`.
 //! Default: k=5, ell=5 (R(5,5) search).
 
+pub mod cayley;
 pub mod circulant;
 pub mod construct;
 pub mod crossover;
@@ -31,6 +32,7 @@ pub fn default_strategies() -> Vec<Box<dyn SearchStrategy>> {
         Box::new(sa::SimulatedAnnealing),
         Box::new(construct::ConstructSearch),
         Box::new(circulant::CirculantSearch),
+        Box::new(cayley::CayleySearch),
         Box::new(lns::LnsSearch),
     ]
 }
