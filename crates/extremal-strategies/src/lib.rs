@@ -20,6 +20,7 @@ pub mod lns;
 pub mod polish;
 pub mod relink;
 pub mod sa;
+pub mod seidel;
 pub mod tabu;
 pub mod tree2;
 
@@ -38,5 +39,6 @@ pub fn default_strategies() -> Vec<Box<dyn SearchStrategy>> {
         Box::new(lns::LnsSearch),
         Box::new(relink::RelinkSearch),
         Box::new(gradient::GradientDescent),
+        Box::new(seidel::SeidelSearch),
     ]
 }

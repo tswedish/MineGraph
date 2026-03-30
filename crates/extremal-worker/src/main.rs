@@ -158,6 +158,14 @@ struct Cli {
     /// Gradient: random edge flips between trials.
     #[arg(long, default_value = "5")]
     gradient_perturb_flips: u64,
+
+    /// Seidel: max switching set size for exhaustive enumeration (1-4).
+    #[arg(long, default_value = "3")]
+    seidel_max_switch_size: u64,
+
+    /// Seidel: number of random switching compositions per round.
+    #[arg(long, default_value = "5000")]
+    seidel_random_compositions: u64,
 }
 
 #[tokio::main]
@@ -229,6 +237,8 @@ async fn main() {
         "gradient_repair_steps": cli.gradient_repair_steps,
         "gradient_tabu_tenure": cli.gradient_tabu_tenure,
         "gradient_perturb_flips": cli.gradient_perturb_flips,
+        "max_switch_size": cli.seidel_max_switch_size,
+        "random_compositions": cli.seidel_random_compositions,
     });
 
     // Parse metadata JSON
