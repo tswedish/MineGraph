@@ -122,16 +122,16 @@ except:
 signal = os.path.exists('experiments/agent/signal-research')
 
 # Decision logic:
-# 0. If agent explicitly signaled research → research
-# 1. If untested strategies exist → experiment (test them)
+# 0. If agent explicitly signaled research AND no untested strategies → research
+# 1. If untested strategies exist → experiment (test them first!)
 # 2. If experiments are plateauing and there are high-priority ideas → research
 # 3. If no ideas left → research (need new ideas)
 # 4. Default: experiment (collecting data is usually more valuable)
 
-if signal:
+if untested:
+    print('experiment')  # Always test existing strategies before creating new ones
+elif signal:
     print('research')
-elif untested:
-    print('experiment')
 elif plateau and high_ideas:
     print('research')
 elif not high_ideas and not untested:

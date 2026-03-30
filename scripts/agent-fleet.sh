@@ -15,7 +15,7 @@ TARGET_ELL=5
 POLISH_MAX_STEPS=100
 POLISH_TABU_TENURE=25
 SCORE_BIAS_THRESHOLD=3
-MAX_ITERS=100000
+MAX_ITERS=500000
 SERVER=http://localhost:3001
 DASHBOARD=ws://localhost:4000/ws/worker
 DURATION=""
@@ -71,14 +71,14 @@ cargo run -p extremal-cli -- register-key --server "$SERVER" 2>&1 | tail -1 || t
 # ── Worker configs ───────────────────────────────────────
 # Diverse configs: wide, focused, deep, explore
 CONFIGS=(
-    "wide-a:--beam-width 150 --max-depth 8 --noise-flips 2 --sample-bias 0.4"
-    "wide-b:--beam-width 200 --max-depth 10 --noise-flips 1 --sample-bias 0.5"
-    "focused:--beam-width 100 --max-depth 12 --focused true --noise-flips 1 --sample-bias 0.5"
-    "deep:--beam-width 60 --max-depth 18 --noise-flips 1 --sample-bias 0.3"
-    "wide-c:--beam-width 180 --max-depth 9 --noise-flips 2 --sample-bias 0.4"
-    "focus-b:--beam-width 120 --max-depth 14 --focused true --noise-flips 2 --sample-bias 0.4"
-    "explore:--beam-width 100 --max-depth 10 --noise-flips 3 --sample-bias 0.3"
-    "wide-d:--beam-width 160 --max-depth 8 --noise-flips 1 --sample-bias 0.6"
+    "wide-a:--beam-width 150 --max-depth 15 --noise-flips 2 --sample-bias 0.4"
+    "wide-b:--beam-width 200 --max-depth 12 --noise-flips 2 --sample-bias 0.4"
+    "wide-c:--beam-width 180 --max-depth 12 --noise-flips 2 --sample-bias 0.4"
+    "wide-d:--beam-width 150 --max-depth 15 --noise-flips 1 --sample-bias 0.5"
+    "focused:--beam-width 120 --max-depth 14 --focused true --noise-flips 2 --sample-bias 0.4"
+    "explore:--beam-width 100 --max-depth 12 --noise-flips 3 --sample-bias 0.3"
+    "deep-polish:--beam-width 150 --max-depth 10 --noise-flips 2 --sample-bias 0.4 --polish-max-steps 500"
+    "deep-ils:--beam-width 150 --max-depth 10 --noise-flips 2 --sample-bias 0.4 --polish-max-steps 200"
 )
 
 # ── Launch ───────────────────────────────────────────────
@@ -110,7 +110,9 @@ for i in $(seq 0 $((WORKERS - 1))); do
     LOG="$LOG_DIR/$NAME.log"
     META="{\"worker_id\":\"$NAME\",\"commit\":\"$COMMIT\",\"started\":\"$STARTED\"}"
 
-    NO_COLOR=1 RUST_LOG=info $BIN --n "$N" \
+    FULL_ARGS="--n $N --target-k $TARGET_K --target-ell $TARGET_ELL --max-iters $MAX_ITERS --polish-max-steps $POLISH_MAX_STEPS --polish-tabu-tenure $POLISH_TABU_TENURE --score-bias-threshold $SCORE_BIAS_THRESHOLD $ARGS"
+    NO_COLOR=1 RUST_LOG=info $BIN \
+        --n "$N" \
         --target-k "$TARGET_K" --target-ell "$TARGET_ELL" \
         --max-iters "$MAX_ITERS" \
         --polish-max-steps "$POLISH_MAX_STEPS" \
@@ -121,7 +123,7 @@ for i in $(seq 0 $((WORKERS - 1))); do
         $ARGS \
         > "$LOG" 2>&1 &
     PIDS+=($!)
-    echo "  $NAME (PID $!): $ARGS"
+    echo "  $NAME (PID $!): $FULL_ARGS"
 done
 
 printf '%s\n' "${PIDS[@]}" > "$LOG_DIR/pids"

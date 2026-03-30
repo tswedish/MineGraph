@@ -3,12 +3,30 @@
 Research, design, and implement new search strategies or optimizations for Extremal.
 This skill is used by the orchestrator when the system decides research is more valuable than running experiments.
 
+## CRITICAL: Complexity Discipline
+
+**Before implementing ANYTHING:**
+
+1. **Check untested strategies first.** Read `experiments/agent/strategies.json`. If there
+   are already untested strategies, DO NOT add more. Return immediately and tell the
+   orchestrator to run experiments on existing untested strategies instead.
+2. **Verify the baseline had a fair run.** tree2+ILS with deep polish (polish_max_steps=500,
+   polish_ils_restarts=3+, max_iters=500000) gets admissions when run for 2+ hours. Short
+   runs or runs with wrong configs (e.g., capped polish) do NOT prove the algorithm is exhausted.
+3. **ONE strategy per research cycle.** Implement one, commit, let experiments test it.
+   Batching 10 strategies in one session creates untested complexity.
+4. **Every strategy must be A/B tested.** Run new strategy alongside tree2 baseline, compare
+   local convergence rates. If it doesn't beat baseline after 30+ minutes, mark "ineffective."
+5. **Roll back failures.** Check findings.json for strategies already marked ineffective.
+   Don't re-implement failed approaches with minor variations.
+
 ## Goal
 
 Improve the quality of graphs found by workers, measured by:
 1. Better leaderboard scores (fewer 4-cliques, better triangle balance, higher symmetry)
 2. Higher admission rate (more graphs beating the threshold)
 3. Faster discovery of valid graphs
+4. Can target n=25 or n=35 (n=35 may have less saturated leaderboard for clearer signal)
 
 ## Inputs
 
@@ -171,8 +189,11 @@ Output a summary:
 
 ## Anti-patterns
 
-- Don't implement multiple ideas in one cycle
+- Don't implement multiple ideas in one cycle (this was violated — 11 strategies in one session)
 - Don't refactor existing strategies (focus on new capabilities)
 - Don't change scoring or server code (only worker/strategy code)
 - Don't add ideas to the registry without implementing something first
 - Don't skip the CI validation step
+- Don't conclude tree2 is exhausted without verifying: (a) correct binary was used, (b) ILS
+  restarts were enabled, (c) polish was deep enough (500+ steps), (d) ran for 2+ hours
+- Don't add strategies faster than the experiment phase can test them

@@ -3,6 +3,21 @@
 Autonomous experiment management for Extremal graph search workers.
 This skill is loaded as system context by `scripts/loop.sh` and can also be invoked interactively.
 
+## Core Principles
+
+1. **Validate before adding complexity.** Never add a new strategy without first testing
+   existing untested ones. Each new strategy must demonstrably beat the baseline (tree2+ILS)
+   on local convergence rate or production admission rate before being kept.
+2. **Longer runs beat more code.** Tree2+ILS gets admissions when run for hours with deep
+   polish. Before concluding an algorithm is exhausted, verify it had a fair run (2+ hours,
+   correct binary, correct config settings actually applied).
+3. **Roll back what doesn't work.** If a strategy shows no improvement after a fair A/B test
+   (30+ min), mark it "ineffective" in strategies.json. Don't keep complexity around "just in case."
+4. **Track everything.** Write to findings.json after every comparison: strategy, config,
+   duration, result vs baseline. Check findings before proposing experiments to avoid repeats.
+5. **Search n=35 too.** The n=35 leaderboard may be less saturated, giving clearer signal
+   about strategy effectiveness. Workers can target any n.
+
 ## Invocation
 
 **Autonomous loop** (preferred): `./run agent-loop` or `./scripts/loop.sh`
