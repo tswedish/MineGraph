@@ -19,6 +19,7 @@ MAX_ITERS=500000
 SERVER=http://localhost:3001
 DASHBOARD=ws://localhost:4000/ws/worker
 DURATION=""
+CAMPAIGN=""
 
 # ── Parse args ───────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -34,6 +35,7 @@ while [[ $# -gt 0 ]]; do
         --server) SERVER="$2"; shift 2 ;;
         --dashboard) DASHBOARD="$2"; shift 2 ;;
         --duration) DURATION="$2"; shift 2 ;;
+        --campaign) CAMPAIGN="$2"; shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -62,19 +64,58 @@ echo "Building release binary..."
 cargo build --release -p extremal-worker 2>&1 | tail -1
 BIN="target/release/extremal-worker"
 
-# ── Signing key ──────────────────────────────────────────
-KEY_FILE=".config/extremal/key.json"
+# ── Signing key (per-campaign or default) ────────────────
+KEYS_DIR=".config/extremal/keys"
+mkdir -p "$KEYS_DIR"
+
+if [[ -n "$CAMPAIGN" ]]; then
+    KEY_FILE="$KEYS_DIR/$CAMPAIGN.json"
+    KEY_NAME="$CAMPAIGN"
+else
+    KEY_FILE=".config/extremal/key.json"
+    KEY_NAME="agent-$(hostname)"
+fi
+
 if [[ ! -f "$KEY_FILE" ]]; then
-    echo "Generating signing key..."
-    cargo run -p extremal-cli -- keygen --name "agent-$(hostname)" 2>&1 | tail -3
+    echo "Generating signing key for '$KEY_NAME'..."
+    cargo run -p extremal-cli -- keygen --name "$KEY_NAME" -o "$KEY_FILE" 2>&1 | tail -3
 fi
 
 KEY_ID=$(python3 -c "import json; print(json.load(open('$KEY_FILE'))['key_id'])" 2>/dev/null || echo "unknown")
-echo "  key_id: $KEY_ID"
+echo "  campaign: ${CAMPAIGN:-default}"
+echo "  key_id: $KEY_ID ($KEY_FILE)"
+
+# Track campaign keys for reference
+if [[ -n "$CAMPAIGN" ]]; then
+    python3 -c "
+import json, os
+registry = '$KEYS_DIR/registry.json'
+try:
+    keys = json.load(open(registry))
+except:
+    keys = {}
+keys['$CAMPAIGN'] = {'key_id': '$KEY_ID', 'key_file': '$KEY_FILE', 'created': '$(date -u +%Y-%m-%dT%H:%M:%SZ)'}
+json.dump(keys, open(registry, 'w'), indent=2)
+" 2>/dev/null
+fi
 
 # Register key with server (idempotent)
+# Temporarily point default key to campaign key for registration
 echo "Registering key with server..."
-cargo run -p extremal-cli -- register-key --server "$SERVER" 2>&1 | tail -1 || true
+DEFAULT_KEY=".config/extremal/key.json"
+if [[ "$KEY_FILE" != "$DEFAULT_KEY" ]]; then
+    ORIG_KEY=""
+    if [[ -f "$DEFAULT_KEY" ]]; then
+        ORIG_KEY=$(cat "$DEFAULT_KEY")
+    fi
+    cp "$KEY_FILE" "$DEFAULT_KEY"
+    cargo run -p extremal-cli -- register-key --server "$SERVER" 2>&1 | tail -1 || true
+    if [[ -n "$ORIG_KEY" ]]; then
+        echo "$ORIG_KEY" > "$DEFAULT_KEY"
+    fi
+else
+    cargo run -p extremal-cli -- register-key --server "$SERVER" 2>&1 | tail -1 || true
+fi
 
 # ── Worker configs ───────────────────────────────────────
 # Diverse configs: wide, focused, deep, explore
@@ -116,7 +157,7 @@ for i in $(seq 0 $((WORKERS - 1))); do
     fi
 
     LOG="$LOG_DIR/$NAME.log"
-    META="{\"worker_id\":\"$NAME\",\"commit\":\"$COMMIT\",\"started\":\"$STARTED\"}"
+    META="{\"worker_id\":\"$NAME\",\"commit\":\"$COMMIT\",\"started\":\"$STARTED\",\"campaign\":\"${CAMPAIGN:-default}\"}"
 
     # Build global defaults, skipping any flags that per-worker ARGS override
     GLOBAL_FLAGS=""
@@ -130,6 +171,7 @@ for i in $(seq 0 $((WORKERS - 1))); do
         --n "$N" \
         --target-k "$TARGET_K" --target-ell "$TARGET_ELL" \
         $GLOBAL_FLAGS \
+        --signing-key "$KEY_FILE" \
         --server "$SERVER" --dashboard "$DASHBOARD" \
         --metadata "$META" \
         $ARGS \

@@ -237,8 +237,10 @@ RESEARCH_EOF
         if ! pgrep -f "extremal-worker" > /dev/null 2>&1; then
             echo "  Launching fleet first..."
             # Launch fleet in background (without the loop part)
+            # Generate campaign name from date + round
+            CAMPAIGN_NAME="orch-$(date +%Y%m%d)-r${ROUND}"
             ./scripts/agent-fleet.sh --workers "$WORKERS" --n 25 --polish "$POLISH" \
-                --server "$SERVER" &
+                --server "$SERVER" --campaign "$CAMPAIGN_NAME" &
             FLEET_PID=$!
             sleep 35  # Wait for fleet warmup
         fi
