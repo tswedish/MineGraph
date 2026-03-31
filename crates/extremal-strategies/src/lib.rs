@@ -10,14 +10,39 @@
 //! is passed via the strategy config JSON as `target_k` and `target_ell`.
 //! Default: k=5, ell=5 (R(5,5) search).
 
+pub mod cayley;
+pub mod circulant;
+pub mod construct;
+pub mod crossover;
+pub mod gradient;
 pub mod init;
+pub mod lns;
 pub mod polish;
+pub mod refine;
+pub mod relink;
+pub mod sa;
+pub mod seidel;
 pub mod tabu;
+pub mod template;
 pub mod tree2;
 
 use extremal_worker_api::SearchStrategy;
 
 /// Get all built-in strategies.
 pub fn default_strategies() -> Vec<Box<dyn SearchStrategy>> {
-    vec![Box::new(tree2::Tree2Search), Box::new(tabu::TabuSearch)]
+    vec![
+        Box::new(tree2::Tree2Search),
+        Box::new(tabu::TabuSearch),
+        Box::new(crossover::CrossoverSearch),
+        Box::new(sa::SimulatedAnnealing),
+        Box::new(construct::ConstructSearch),
+        Box::new(circulant::CirculantSearch),
+        Box::new(cayley::CayleySearch),
+        Box::new(lns::LnsSearch),
+        Box::new(relink::RelinkSearch),
+        Box::new(gradient::GradientDescent),
+        Box::new(seidel::SeidelSearch),
+        Box::new(refine::RefineSearch),
+        Box::new(template::TemplateSearch),
+    ]
 }

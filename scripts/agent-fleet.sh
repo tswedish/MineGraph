@@ -9,16 +9,17 @@ set -euo pipefail
 
 # ── Defaults ─────────────────────────────────────────────
 WORKERS=8
-N=25
+N=35
 TARGET_K=5
 TARGET_ELL=5
 POLISH_MAX_STEPS=100
 POLISH_TABU_TENURE=25
 SCORE_BIAS_THRESHOLD=3
-MAX_ITERS=100000
+MAX_ITERS=500000
 SERVER=http://localhost:3001
 DASHBOARD=ws://localhost:4000/ws/worker
 DURATION=""
+CAMPAIGN=""
 
 # ── Parse args ───────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -34,6 +35,7 @@ while [[ $# -gt 0 ]]; do
         --server) SERVER="$2"; shift 2 ;;
         --dashboard) DASHBOARD="$2"; shift 2 ;;
         --duration) DURATION="$2"; shift 2 ;;
+        --campaign) CAMPAIGN="$2"; shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -49,36 +51,83 @@ echo "  commit: $COMMIT"
 echo "  n=$N workers=$WORKERS polish=$POLISH_MAX_STEPS"
 echo "  logs: $LOG_DIR"
 
+# ── Kill existing workers ────────────────────────────────
+if pgrep -f "extremal-worker" > /dev/null 2>&1; then
+    echo "Stopping existing workers..."
+    pkill -f "extremal-worker" 2>/dev/null || true
+    sleep 2
+    pkill -9 -f "extremal-worker" 2>/dev/null || true
+fi
+
 # ── Build ────────────────────────────────────────────────
 echo "Building release binary..."
 cargo build --release -p extremal-worker 2>&1 | tail -1
 BIN="target/release/extremal-worker"
 
-# ── Signing key ──────────────────────────────────────────
-KEY_FILE=".config/extremal/key.json"
+# ── Signing key (per-campaign or default) ────────────────
+KEYS_DIR=".config/extremal/keys"
+mkdir -p "$KEYS_DIR"
+
+if [[ -n "$CAMPAIGN" ]]; then
+    KEY_FILE="$KEYS_DIR/$CAMPAIGN.json"
+    KEY_NAME="$CAMPAIGN"
+else
+    KEY_FILE=".config/extremal/key.json"
+    KEY_NAME="agent-$(hostname)"
+fi
+
 if [[ ! -f "$KEY_FILE" ]]; then
-    echo "Generating signing key..."
-    cargo run -p extremal-cli -- keygen --name "agent-$(hostname)" 2>&1 | tail -3
+    echo "Generating signing key for '$KEY_NAME'..."
+    cargo run -p extremal-cli -- keygen --name "$KEY_NAME" -o "$KEY_FILE" 2>&1 | tail -3
 fi
 
 KEY_ID=$(python3 -c "import json; print(json.load(open('$KEY_FILE'))['key_id'])" 2>/dev/null || echo "unknown")
-echo "  key_id: $KEY_ID"
+echo "  campaign: ${CAMPAIGN:-default}"
+echo "  key_id: $KEY_ID ($KEY_FILE)"
+
+# Track campaign keys for reference
+if [[ -n "$CAMPAIGN" ]]; then
+    python3 -c "
+import json, os
+registry = '$KEYS_DIR/registry.json'
+try:
+    keys = json.load(open(registry))
+except:
+    keys = {}
+keys['$CAMPAIGN'] = {'key_id': '$KEY_ID', 'key_file': '$KEY_FILE', 'created': '$(date -u +%Y-%m-%dT%H:%M:%SZ)'}
+json.dump(keys, open(registry, 'w'), indent=2)
+" 2>/dev/null
+fi
 
 # Register key with server (idempotent)
+# Temporarily point default key to campaign key for registration
 echo "Registering key with server..."
-cargo run -p extremal-cli -- register-key --server "$SERVER" 2>&1 | tail -1 || true
+DEFAULT_KEY=".config/extremal/key.json"
+if [[ "$KEY_FILE" != "$DEFAULT_KEY" ]]; then
+    ORIG_KEY=""
+    if [[ -f "$DEFAULT_KEY" ]]; then
+        ORIG_KEY=$(cat "$DEFAULT_KEY")
+    fi
+    cp "$KEY_FILE" "$DEFAULT_KEY"
+    cargo run -p extremal-cli -- register-key --server "$SERVER" 2>&1 | tail -1 || true
+    if [[ -n "$ORIG_KEY" ]]; then
+        echo "$ORIG_KEY" > "$DEFAULT_KEY"
+    fi
+else
+    cargo run -p extremal-cli -- register-key --server "$SERVER" 2>&1 | tail -1 || true
+fi
 
 # ── Worker configs ───────────────────────────────────────
 # Diverse configs: wide, focused, deep, explore
 CONFIGS=(
-    "wide-a:--beam-width 150 --max-depth 8 --noise-flips 2 --sample-bias 0.4"
-    "wide-b:--beam-width 200 --max-depth 10 --noise-flips 1 --sample-bias 0.5"
-    "focused:--beam-width 100 --max-depth 12 --focused true --noise-flips 1 --sample-bias 0.5"
-    "deep:--beam-width 60 --max-depth 18 --noise-flips 1 --sample-bias 0.3"
-    "wide-c:--beam-width 180 --max-depth 9 --noise-flips 2 --sample-bias 0.4"
-    "focus-b:--beam-width 120 --max-depth 14 --focused true --noise-flips 2 --sample-bias 0.4"
-    "explore:--beam-width 100 --max-depth 10 --noise-flips 3 --sample-bias 0.3"
-    "wide-d:--beam-width 160 --max-depth 8 --noise-flips 1 --sample-bias 0.6"
+    "wide-a:--beam-width 150 --max-depth 15 --noise-flips 2 --sample-bias 0.4"
+    "wide-b:--beam-width 200 --max-depth 12 --noise-flips 2 --sample-bias 0.4"
+    "wide-c:--beam-width 180 --max-depth 12 --noise-flips 2 --sample-bias 0.4"
+    "wide-d:--beam-width 150 --max-depth 15 --noise-flips 1 --sample-bias 0.5"
+    "focused:--beam-width 120 --max-depth 14 --focused true --noise-flips 2 --sample-bias 0.4"
+    "explore:--beam-width 100 --max-depth 12 --noise-flips 3 --sample-bias 0.3"
+    "deep-polish:--beam-width 150 --max-depth 10 --noise-flips 2 --sample-bias 0.4 --polish-max-steps 500 --polish-ils-restarts 5"
+    "deep-ils:--beam-width 150 --max-depth 10 --noise-flips 2 --sample-bias 0.4 --polish-max-steps 300 --polish-ils-restarts 5"
 )
 
 # ── Launch ───────────────────────────────────────────────
@@ -108,20 +157,27 @@ for i in $(seq 0 $((WORKERS - 1))); do
     fi
 
     LOG="$LOG_DIR/$NAME.log"
-    META="{\"worker_id\":\"$NAME\",\"commit\":\"$COMMIT\",\"started\":\"$STARTED\"}"
+    META="{\"worker_id\":\"$NAME\",\"commit\":\"$COMMIT\",\"started\":\"$STARTED\",\"campaign\":\"${CAMPAIGN:-default}\"}"
 
-    NO_COLOR=1 RUST_LOG=info $BIN --n "$N" \
+    # Build global defaults, skipping any flags that per-worker ARGS override
+    GLOBAL_FLAGS=""
+    [[ "$ARGS" != *"--max-iters"* ]] && GLOBAL_FLAGS="$GLOBAL_FLAGS --max-iters $MAX_ITERS"
+    [[ "$ARGS" != *"--polish-max-steps"* ]] && GLOBAL_FLAGS="$GLOBAL_FLAGS --polish-max-steps $POLISH_MAX_STEPS"
+    [[ "$ARGS" != *"--polish-tabu-tenure"* ]] && GLOBAL_FLAGS="$GLOBAL_FLAGS --polish-tabu-tenure $POLISH_TABU_TENURE"
+    [[ "$ARGS" != *"--score-bias-threshold"* ]] && GLOBAL_FLAGS="$GLOBAL_FLAGS --score-bias-threshold $SCORE_BIAS_THRESHOLD"
+
+    FULL_CMD="--n $N --target-k $TARGET_K --target-ell $TARGET_ELL$GLOBAL_FLAGS $ARGS"
+    NO_COLOR=1 RUST_LOG=info $BIN \
+        --n "$N" \
         --target-k "$TARGET_K" --target-ell "$TARGET_ELL" \
-        --max-iters "$MAX_ITERS" \
-        --polish-max-steps "$POLISH_MAX_STEPS" \
-        --polish-tabu-tenure "$POLISH_TABU_TENURE" \
-        --score-bias-threshold "$SCORE_BIAS_THRESHOLD" \
+        $GLOBAL_FLAGS \
+        --signing-key "$KEY_FILE" \
         --server "$SERVER" --dashboard "$DASHBOARD" \
         --metadata "$META" \
         $ARGS \
         > "$LOG" 2>&1 &
     PIDS+=($!)
-    echo "  $NAME (PID $!): $ARGS"
+    echo "  $NAME (PID $!):$FULL_CMD"
 done
 
 printf '%s\n' "${PIDS[@]}" > "$LOG_DIR/pids"

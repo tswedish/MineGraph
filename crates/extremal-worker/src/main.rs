@@ -104,12 +104,72 @@ struct Cli {
     score_bias_threshold: u64,
 
     /// ILS restarts: perturbation+re-polish cycles per valid graph (0 = disabled).
-    #[arg(long, default_value = "0")]
+    #[arg(long, default_value = "3")]
     polish_ils_restarts: u64,
 
     /// ILS perturbation edges: random valid-preserving flips between polish walks.
     #[arg(long, default_value = "3")]
     polish_ils_perturb: u64,
+
+    /// Enable 2-opt paired edge flips in polish (escapes single-flip basins).
+    #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
+    polish_2opt: bool,
+
+    /// SA initial temperature (higher = more exploration through invalid states).
+    #[arg(long, default_value = "10.0")]
+    sa_initial_temp: f64,
+
+    /// SA violation weight in objective (lower = more willing to traverse invalid states).
+    #[arg(long, default_value = "10")]
+    sa_violation_weight: i64,
+
+    /// Construct: max tabu iterations to repair near-valid constructions.
+    #[arg(long, default_value = "10000")]
+    repair_max_iters: u64,
+
+    /// Construct: max violations to attempt repair (0 = only exact valid).
+    #[arg(long, default_value = "10")]
+    repair_threshold: u64,
+
+    /// LNS: vertices per neighborhood block (4-8). Higher = larger search radius but exponentially more states.
+    #[arg(long, default_value = "6")]
+    lns_block_size: u64,
+
+    /// Relink: max endpoint graphs to accumulate for path relinking.
+    #[arg(long, default_value = "50")]
+    pool_capacity: u64,
+
+    /// Relink: max violations allowed during path traversal (0 = strict validity).
+    #[arg(long, default_value = "2")]
+    max_violations: u64,
+
+    /// Gradient: max steps in 4c descent phase.
+    #[arg(long, default_value = "200")]
+    gradient_descent_steps: u64,
+
+    /// Gradient: max steps in violation repair phase.
+    #[arg(long, default_value = "5000")]
+    gradient_repair_steps: u64,
+
+    /// Gradient: tabu tenure during descent/repair.
+    #[arg(long, default_value = "25")]
+    gradient_tabu_tenure: u64,
+
+    /// Gradient: random edge flips between trials.
+    #[arg(long, default_value = "5")]
+    gradient_perturb_flips: u64,
+
+    /// Seidel: max switching set size for exhaustive enumeration (1-4).
+    #[arg(long, default_value = "3")]
+    seidel_max_switch_size: u64,
+
+    /// Seidel: number of random switching compositions per round.
+    #[arg(long, default_value = "5000")]
+    seidel_random_compositions: u64,
+
+    /// Template: min unique seeds to build template.
+    #[arg(long, default_value = "3")]
+    template_pool_size: u64,
 }
 
 #[tokio::main]
@@ -169,6 +229,21 @@ async fn main() {
         "score_bias_threshold": cli.score_bias_threshold,
         "polish_ils_restarts": cli.polish_ils_restarts,
         "polish_ils_perturb": cli.polish_ils_perturb,
+        "polish_2opt": cli.polish_2opt,
+        "sa_initial_temp": cli.sa_initial_temp,
+        "sa_violation_weight": cli.sa_violation_weight,
+        "repair_max_iters": cli.repair_max_iters,
+        "repair_threshold": cli.repair_threshold,
+        "lns_block_size": cli.lns_block_size,
+        "pool_capacity": cli.pool_capacity,
+        "max_violations": cli.max_violations,
+        "gradient_descent_steps": cli.gradient_descent_steps,
+        "gradient_repair_steps": cli.gradient_repair_steps,
+        "gradient_tabu_tenure": cli.gradient_tabu_tenure,
+        "gradient_perturb_flips": cli.gradient_perturb_flips,
+        "max_switch_size": cli.seidel_max_switch_size,
+        "random_compositions": cli.seidel_random_compositions,
+        "template_pool_size": cli.template_pool_size,
     });
 
     // Parse metadata JSON
@@ -250,6 +325,9 @@ async fn main() {
             known_cids_count: 0,
             server_cids_count: 0,
             last_round_ms: 0,
+            best_local_score: None,
+            uptime_secs: 0,
+            last_admitted_at: None,
         },
     };
     let (snapshot_tx, snapshot_rx) = watch::channel(initial_snapshot);

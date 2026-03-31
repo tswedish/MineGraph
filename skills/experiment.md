@@ -3,6 +3,27 @@
 Autonomous experiment management for Extremal graph search workers.
 This skill is loaded as system context by `scripts/loop.sh` and can also be invoked interactively.
 
+## Core Principles
+
+1. **Validate before adding complexity.** Never add a new strategy without first testing
+   existing untested ones. Each new strategy must demonstrably beat the baseline (tree2+ILS)
+   on local convergence rate or production admission rate before being kept.
+2. **Longer runs beat more code.** Tree2+ILS gets admissions when run for hours with deep
+   polish. Before concluding an algorithm is exhausted, verify it had a fair run (2+ hours,
+   correct binary, correct config settings actually applied).
+3. **Roll back what doesn't work.** If a strategy shows no improvement after a fair A/B test
+   (30+ min), mark it "ineffective" in strategies.json. Don't keep complexity around "just in case."
+4. **Track everything.** Write to findings.json after every comparison: strategy, config,
+   duration, result vs baseline. Check findings before proposing experiments to avoid repeats.
+5. **Multiple n values are available.** n=24/28/30 boards are stale from old tabu strategy
+   (March 24) and likely easy to improve. n=35 is active but at ceiling. n=25 is the
+   primary target. Workers can target any n via fleet config.
+6. **Carry-state dedup exhaustion.** After ~2000-5000 rounds with noise_flips≤2, workers
+   exhaust the fingerprint space and produce zero unique output (280ms rounds, skip_thr=0).
+   Fix: set noise_flips=4-6 for long runs, or monitor for this pattern and bump mid-session.
+7. **Throughput beats depth at ceiling.** Reducing polish overhead (100 steps, 3 ILS restarts)
+   increased admission rate ~10x vs deep polish (500 steps, 5 restarts) on saturated boards.
+
 ## Invocation
 
 **Autonomous loop** (preferred): `./run agent-loop` or `./scripts/loop.sh`
@@ -25,17 +46,20 @@ Four helper scripts handle the mechanical work:
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `./scripts/loop.sh` | Full agent loop (fleet + observe cycles) | `./scripts/loop.sh --workers 4 --interval 5m` |
-| `./scripts/agent-fleet.sh` | Launch fleet with full hygiene | `./scripts/agent-fleet.sh --workers 4 --n 25 --polish 100` |
+| `./scripts/agent-fleet.sh` | Launch fleet with full hygiene | `./scripts/agent-fleet.sh --workers 4 --n 25 --campaign my-test` |
 | `./scripts/agent-status.sh` | Formatted status report | `./scripts/agent-status.sh [LOG_DIR]` |
 | `./scripts/agent-snapshot.sh` | Leaderboard snapshot | `./scripts/agent-snapshot.sh [N] [SERVER_URL]` |
+| `./scripts/agent-provenance.sh` | Trace entries to commits/configs | `./scripts/agent-provenance.sh 25` |
+| `./scripts/agent-ab-test.sh` | Quick A/B comparison | `./scripts/agent-ab-test.sh --a "..." --b "..."` |
 
 ### agent-fleet.sh handles:
 - Release build
-- Signing key generation + server registration (idempotent)
+- **Per-campaign signing keys** (--campaign NAME creates unique identity on leaderboard)
 - Unique worker_ids from diverse config presets (wide-a/b, focused, deep, explore...)
-- Commit hash + timestamp in metadata
+- Commit hash + timestamp + campaign in metadata
 - config.json with all params + PIDs
 - Signal trapping for graceful shutdown
+- Kills existing workers before launching (prevents duplicates)
 - Optional `--duration 30m` for timed runs
 
 ### agent-status.sh provides:
@@ -172,6 +196,18 @@ curl -sf https://api.extremal.online/api/leaderboards/25/export
 - **Use for A/B testing**: Run 2 workers with different configs, compare local convergence curves. The steeper curve is the better searcher.
 - **Caveat**: Local convergence measures search efficiency, not absolute quality. Always validate that local improvements translate to production admits.
 - Log mini-experiment findings to journal with tag "LOCAL-BENCHMARK".
+
+**Triggering strategy research:**
+- When you conclude the algorithm has hit a hard wall (not just a slow plateau), you can
+  signal the orchestrator to switch to strategy-research mode.
+- **How**: Write a file `experiments/agent/signal-research` with a brief explanation:
+  ```bash
+  echo "Zero admits across 5000+ rounds over 20 hours. tree2 beam search exhausted at 4c>=67 threshold. Need algorithmic changes: crossover, deep tabu, or alternative construction." > experiments/agent/signal-research
+  ```
+- The orchestrator checks for this file between cycles. When found, it stops the experiment
+  phase, kills the fleet, and starts a research phase that can implement new algorithms.
+- **Only signal research when**: parameter tuning is provably spent (multiple sessions,
+  diverse configs, zero progress for hours). NOT after a 30-minute plateau.
 
 ## Decide Phase
 

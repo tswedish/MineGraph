@@ -30,12 +30,14 @@ cd "$(dirname "$0")/.."
 SERVER="https://api.extremal.online"
 MODE="auto"          # auto, research, experiment
 WORKERS=8
+N=35
 POLISH=100
 EXPERIMENT_INTERVAL="10m"
 EXPERIMENT_CYCLES=12  # how many experiment cycles before re-evaluating (~2 hours)
 RESEARCH_BUDGET="5.00"
 EXPERIMENT_BUDGET="1.50"
-MODEL="opus"
+RESEARCH_MODEL="opus"
+EXPERIMENT_MODEL="sonnet"
 
 # ── Parse args ───────────────────────────────────────────
 PASSTHROUGH_ARGS=()
@@ -45,10 +47,13 @@ while [[ $# -gt 0 ]]; do
         --research)    MODE="research"; shift ;;
         --experiment)  MODE="experiment"; shift ;;
         --workers)     WORKERS="$2"; PASSTHROUGH_ARGS+=("$1" "$2"); shift 2 ;;
+        --n)           N="$2"; shift 2 ;;
         --polish)      POLISH="$2"; PASSTHROUGH_ARGS+=("$1" "$2"); shift 2 ;;
         --interval)    EXPERIMENT_INTERVAL="$2"; PASSTHROUGH_ARGS+=("$1" "$2"); shift 2 ;;
         --cycles)      EXPERIMENT_CYCLES="$2"; shift 2 ;;
-        --model)       MODEL="$2"; shift 2 ;;
+        --model)       RESEARCH_MODEL="$2"; EXPERIMENT_MODEL="$2"; shift 2 ;;
+        --experiment-model) EXPERIMENT_MODEL="$2"; shift 2 ;;
+        --research-model)   RESEARCH_MODEL="$2"; shift 2 ;;
         *)             PASSTHROUGH_ARGS+=("$1"); shift ;;
     esac
 done
@@ -66,7 +71,7 @@ echo "╠═══════════════════════�
 echo "║  server:   $SERVER"
 echo "║  branch:   $BRANCH ($COMMIT)"
 echo "║  mode:     $MODE"
-echo "║  model:    $MODEL"
+echo "║  models:   research=$RESEARCH_MODEL experiment=$EXPERIMENT_MODEL"
 echo "║  logs:     $LOG_DIR"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
@@ -118,14 +123,20 @@ try:
 except:
     pass
 
+# Check for explicit signal file from agent
+signal = os.path.exists('experiments/agent/signal-research')
+
 # Decision logic:
-# 1. If untested strategies exist → experiment (test them)
+# 0. If agent explicitly signaled research AND no untested strategies → research
+# 1. If untested strategies exist → experiment (test them first!)
 # 2. If experiments are plateauing and there are high-priority ideas → research
-# 3. If no ideas left → experiment (keep running best config)
+# 3. If no ideas left → research (need new ideas)
 # 4. Default: experiment (collecting data is usually more valuable)
 
 if untested:
-    print('experiment')
+    print('experiment')  # Always test existing strategies before creating new ones
+elif signal:
+    print('research')
 elif plateau and high_ideas:
     print('research')
 elif not high_ideas and not untested:
@@ -137,6 +148,7 @@ else:
 
 # ── Main loop ────────────────────────────────────────────
 ROUND=0
+FORCE_RESEARCH=false
 while true; do
     ROUND=$((ROUND + 1))
     COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -148,7 +160,10 @@ while true; do
     echo "╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍"
 
     # Decide mode
-    if [[ "$MODE" == "auto" ]]; then
+    if [[ "$FORCE_RESEARCH" == "true" ]]; then
+        CHOSEN="research"
+        FORCE_RESEARCH=false
+    elif [[ "$MODE" == "auto" ]]; then
         CHOSEN=$(decide_mode)
     else
         CHOSEN="$MODE"
@@ -181,12 +196,12 @@ RESEARCH_EOF
             if timeout "$CLAUDE_TIMEOUT" bash -c 'echo "$1" | claude \
                 --print \
                 --model "$2" \
-                --effort max \
+                --effort high \
                 --append-system-prompt-file "skills/strategy-research.md" \
                 --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
                 --max-budget-usd "$3" \
                 --no-session-persistence' \
-                _ "$RESEARCH_PROMPT" "$MODEL" "$RESEARCH_BUDGET" \
+                _ "$RESEARCH_PROMPT" "$RESEARCH_MODEL" "$RESEARCH_BUDGET" \
                 2>&1 | tee "$LOG_DIR/research-$ROUND.log"; then
                 RESEARCH_OK=true
                 echo "  [$(date '+%H:%M:%S')] Research attempt $ATTEMPT succeeded."
@@ -224,8 +239,10 @@ RESEARCH_EOF
         if ! pgrep -f "extremal-worker" > /dev/null 2>&1; then
             echo "  Launching fleet first..."
             # Launch fleet in background (without the loop part)
-            ./scripts/agent-fleet.sh --workers "$WORKERS" --n 25 --polish "$POLISH" \
-                --server "$SERVER" &
+            # Generate campaign name from date + round
+            CAMPAIGN_NAME="orch-$(date +%Y%m%d)-r${ROUND}"
+            ./scripts/agent-fleet.sh --workers "$WORKERS" --n "$N" --polish "$POLISH" \
+                --server "$SERVER" --campaign "$CAMPAIGN_NAME" &
             FLEET_PID=$!
             sleep 35  # Wait for fleet warmup
         fi
@@ -233,12 +250,52 @@ RESEARCH_EOF
         # Find the most recent log dir
         FLEET_LOG=$(ls -td logs/agent-* 2>/dev/null | head -1)
 
+        PREV_CYCLE_LOG=""
         for CYCLE in $(seq 1 "$EXPERIMENT_CYCLES"); do
             echo ""
             echo "  ── Experiment Cycle $CYCLE/$EXPERIMENT_CYCLES ──"
 
             STATUS_FILE=$(mktemp)
             ./scripts/agent-status.sh "$FLEET_LOG" > "$STATUS_FILE" 2>&1 || true
+
+            # Build previous cycle context (last cycle's output, truncated)
+            PREV_CYCLE_SECTION=""
+            if [[ -n "$PREV_CYCLE_LOG" && -f "$PREV_CYCLE_LOG" ]]; then
+                PREV_OUTPUT=$(tail -80 "$PREV_CYCLE_LOG" 2>/dev/null || true)
+                if [[ -n "$PREV_OUTPUT" ]]; then
+                    PREV_CYCLE_SECTION="
+## Previous Cycle Output
+This is what you (a previous instance) reported last cycle. Use it for continuity.
+\`\`\`
+$PREV_OUTPUT
+\`\`\`"
+                fi
+            fi
+
+            # Include recent findings and journal for cross-run continuity
+            FINDINGS_SECTION=""
+            if [[ -f "experiments/agent/findings.json" ]]; then
+                FINDINGS_SECTION="
+## Recent Findings (from previous runs — READ for continuity)
+$(cat experiments/agent/findings.json | python3 -c "
+import json, sys
+findings = json.load(sys.stdin)
+# Show last 8 findings (most recent at bottom)
+for f in findings[-8:]:
+    print(f'- [{f.get(\"date\",\"?\")}] {f[\"finding\"]}')
+" 2>/dev/null || echo '(could not parse findings.json)')"
+            fi
+            JOURNAL_SECTION=""
+            if [[ -f "experiments/agent/journal.md" ]]; then
+                JOURNAL_TAIL=$(tail -30 experiments/agent/journal.md 2>/dev/null || true)
+                if [[ -n "$JOURNAL_TAIL" ]]; then
+                    JOURNAL_SECTION="
+## Recent Journal (last 30 lines from previous runs)
+\`\`\`
+$JOURNAL_TAIL
+\`\`\`"
+                fi
+            fi
 
             # Collect inbox messages
             INBOX_DIR="experiments/agent/inbox"
@@ -264,6 +321,9 @@ $INBOX_CONTENT"
             EXPERIMENT_PROMPT=$(cat <<EXPERIMENT_EOF
 Run one experiment agent observe-decide-act cycle per the experiment skill protocol.
 $INBOX_SECTION
+$FINDINGS_SECTION
+$JOURNAL_SECTION
+$PREV_CYCLE_SECTION
 
 ## Current Fleet Status
 $(cat "$STATUS_FILE")
@@ -324,12 +384,12 @@ EXPERIMENT_EOF
                 if timeout "$CLAUDE_TIMEOUT" bash -c 'echo "$1" | claude \
                     --print \
                     --model "$2" \
-                    --effort max \
+                    --effort high \
                     --append-system-prompt-file "skills/experiment.md" \
                     --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
                     --max-budget-usd "$3" \
                     --no-session-persistence' \
-                    _ "$EXPERIMENT_PROMPT" "$MODEL" "$EXPERIMENT_BUDGET" \
+                    _ "$EXPERIMENT_PROMPT" "$EXPERIMENT_MODEL" "$EXPERIMENT_BUDGET" \
                     2>&1 | tee "$LOG_DIR/experiment-${ROUND}-${CYCLE}.log"; then
                     CYCLE_OK=true
                     echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE attempt $ATTEMPT succeeded."
@@ -349,7 +409,19 @@ EXPERIMENT_EOF
                 echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE failed after 3 attempts, skipping."
             fi
 
+            # Track this cycle's log for next cycle's context
+            PREV_CYCLE_LOG="$LOG_DIR/experiment-${ROUND}-${CYCLE}.log"
+
             rm -f "$STATUS_FILE"
+
+            # Check if agent signaled a switch to research mode
+            if [[ -f "experiments/agent/signal-research" ]]; then
+                echo "  Agent requested strategy-research phase!"
+                cat "experiments/agent/signal-research"
+                rm -f "experiments/agent/signal-research"
+                FORCE_RESEARCH=true
+                break
+            fi
 
             if [[ $CYCLE -lt $EXPERIMENT_CYCLES ]]; then
                 echo "  Next experiment cycle in $EXPERIMENT_INTERVAL..."

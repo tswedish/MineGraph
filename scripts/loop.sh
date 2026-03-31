@@ -31,7 +31,7 @@ WORKERS=8
 POLISH=100
 INTERVAL="10m"
 BUDGET="1.50"
-MODEL="opus"
+MODEL="sonnet"
 LAUNCH_FLEET=true
 FLEET_PIDS=""
 CLAUDE_TIMEOUT=1200  # 20 min max per claude invocation
@@ -181,6 +181,7 @@ fi
 
 # ── Observation Loop ─────────────────────────────────────
 CYCLE=0
+PREV_CYCLE_LOG=""
 while true; do
     CYCLE=$((CYCLE + 1))
     NOW=$(date '+%Y-%m-%d %H:%M')
@@ -193,6 +194,44 @@ while true; do
     # Gather current status into a temp file for the prompt
     STATUS_FILE=$(mktemp)
     ./scripts/agent-status.sh "$LOG_DIR" > "$STATUS_FILE" 2>&1 || true
+
+    # Build previous cycle context
+    PREV_CYCLE_SECTION=""
+    if [[ -n "$PREV_CYCLE_LOG" && -f "$PREV_CYCLE_LOG" ]]; then
+        PREV_OUTPUT=$(tail -80 "$PREV_CYCLE_LOG" 2>/dev/null || true)
+        if [[ -n "$PREV_OUTPUT" ]]; then
+            PREV_CYCLE_SECTION="
+## Previous Cycle Output
+This is what you (a previous instance) reported last cycle. Use it for continuity.
+\`\`\`
+$PREV_OUTPUT
+\`\`\`"
+        fi
+    fi
+
+    # Include recent findings and journal for cross-run continuity
+    FINDINGS_SECTION=""
+    if [[ -f "experiments/agent/findings.json" ]]; then
+        FINDINGS_SECTION="
+## Recent Findings (from previous runs — READ for continuity)
+$(cat experiments/agent/findings.json | python3 -c "
+import json, sys
+findings = json.load(sys.stdin)
+for f in findings[-8:]:
+    print(f'- [{f.get(\"date\",\"?\")}] {f[\"finding\"]}')
+" 2>/dev/null || echo '(could not parse findings.json)')"
+    fi
+    JOURNAL_SECTION=""
+    if [[ -f "experiments/agent/journal.md" ]]; then
+        JOURNAL_TAIL=$(tail -30 experiments/agent/journal.md 2>/dev/null || true)
+        if [[ -n "$JOURNAL_TAIL" ]]; then
+            JOURNAL_SECTION="
+## Recent Journal (last 30 lines from previous runs)
+\`\`\`
+$JOURNAL_TAIL
+\`\`\`"
+        fi
+    fi
 
     # Collect inbox messages
     INBOX_DIR="experiments/agent/inbox"
@@ -220,6 +259,9 @@ $INBOX_CONTENT"
     PROMPT=$(cat <<PROMPT_EOF
 Run one experiment agent observe-decide-act cycle per the experiment skill protocol.
 $INBOX_SECTION
+$FINDINGS_SECTION
+$JOURNAL_SECTION
+$PREV_CYCLE_SECTION
 
 ## Current Fleet Status
 $(cat "$STATUS_FILE")
@@ -289,7 +331,7 @@ PROMPT_EOF
         if timeout "$CLAUDE_TIMEOUT" bash -c 'echo "$1" | claude \
             --print \
             --model "$2" \
-            --effort max \
+            --effort high \
             --append-system-prompt-file "skills/experiment.md" \
             --allowed-tools "Bash(*) Read(*) Edit(*) Write(*) Grep(*) Glob(*)" \
             --max-budget-usd "$3" \
@@ -313,6 +355,9 @@ PROMPT_EOF
     if [[ "$CYCLE_OK" == "false" ]]; then
         echo "  [$(date '+%H:%M:%S')] Cycle $CYCLE failed after 3 attempts, skipping to next cycle."
     fi
+
+    # Track this cycle's log for next cycle's context
+    PREV_CYCLE_LOG="$LOG_DIR/cycle-$CYCLE.log"
 
     rm -f "$STATUS_FILE"
 

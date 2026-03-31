@@ -3,12 +3,30 @@
 Research, design, and implement new search strategies or optimizations for Extremal.
 This skill is used by the orchestrator when the system decides research is more valuable than running experiments.
 
+## CRITICAL: Complexity Discipline
+
+**Before implementing ANYTHING:**
+
+1. **Check untested strategies first.** Read `experiments/agent/strategies.json`. If there
+   are already untested strategies, DO NOT add more. Return immediately and tell the
+   orchestrator to run experiments on existing untested strategies instead.
+2. **Verify the baseline had a fair run.** tree2+ILS with deep polish (polish_max_steps=500,
+   polish_ils_restarts=3+, max_iters=500000) gets admissions when run for 2+ hours. Short
+   runs or runs with wrong configs (e.g., capped polish) do NOT prove the algorithm is exhausted.
+3. **ONE strategy per research cycle.** Implement one, commit, let experiments test it.
+   Batching 10 strategies in one session creates untested complexity.
+4. **Every strategy must be A/B tested.** Run new strategy alongside tree2 baseline, compare
+   local convergence rates. If it doesn't beat baseline after 30+ minutes, mark "ineffective."
+5. **Roll back failures.** Check findings.json for strategies already marked ineffective.
+   Don't re-implement failed approaches with minor variations.
+
 ## Goal
 
 Improve the quality of graphs found by workers, measured by:
 1. Better leaderboard scores (fewer 4-cliques, better triangle balance, higher symmetry)
 2. Higher admission rate (more graphs beating the threshold)
 3. Faster discovery of valid graphs
+4. Can target n=25 or n=35 (n=35 may have less saturated leaderboard for clearer signal)
 
 ## Inputs
 
@@ -132,15 +150,17 @@ cargo run -p extremal-experiments --release -- compare --n 25 --budget 100000 --
 
 ### 5. Commit
 
-Commit on the current branch (do NOT create a new branch):
+Commit on the current branch (do NOT create a new branch).
+**CRITICAL: Respect .gitignore.** The `experiments/` directory is gitignored. NEVER
+`git add` files under `experiments/`. Only commit source code changes in `crates/` and `scripts/`.
 ```bash
-git add <files>
+git add crates/ scripts/    # ONLY source code, never experiments/
 git commit -m "feat: <description of strategy change>"
 ```
 
 ### 6. Update Registry
 
-Update `experiments/agent/strategies.json`:
+Update `experiments/agent/strategies.json` (this file is NOT tracked in git — it's local state):
 - If new strategy: add to `strategies` list with `status: "untested"`
 - If new config preset: add to `strategies` list with `status: "untested"`
 - Move the implemented idea from `ideas` to `strategies`
@@ -160,6 +180,27 @@ Output a summary:
 **How to test**: [specific experiment config or fleet params]
 ```
 
+## Available Analysis Tools
+
+Use these scripts to inform your research:
+
+```bash
+# Trace what commit/config produced top leaderboard entries
+./scripts/agent-provenance.sh 25        # n=25, top 20
+./scripts/agent-provenance.sh 35 50     # n=35, top 50
+
+# A/B test a change before committing to full fleet
+./scripts/agent-ab-test.sh --duration 10m \
+  --a "--beam-width 150 --noise-flips 2" \
+  --b "--beam-width 150 --noise-flips 4 --polish-max-steps 500"
+
+# Check fleet status
+./scripts/agent-status.sh
+
+# Leaderboard snapshot
+./scripts/agent-snapshot.sh 25
+```
+
 ## Guidelines
 
 - **One change per research cycle**. Don't try to do everything at once.
@@ -169,10 +210,42 @@ Output a summary:
 - **Stay on current branch**. The orchestrator expects commits on the active branch.
 - **Don't break existing tests**. `./run ci` must pass after your changes.
 
+## Code Hygiene
+
+**Keep the codebase close to what works.** The strategies crate should contain:
+- **Core strategies** that have produced production admissions (tree2, tabu, polish)
+- **Promising strategies** actively being tested
+- NOT a graveyard of untested ideas
+
+**When adding a strategy:**
+1. Implement it, add tests, commit
+2. The experiment phase tests it in production
+3. If it produces admissions → keep it, document results
+4. If it doesn't after fair testing → **remove the code**, document what was tried in
+   findings.json. Don't leave 600-line files around "just in case."
+
+**When removing a strategy:**
+1. Document in findings.json: what it did, why it was removed, what might make it worth revisiting
+2. Remove from `lib.rs` registration and delete the file
+3. It's still in git history if anyone wants to recover it
+4. Commit: `chore: remove <strategy> — no production admissions after N hours testing (see findings.json)`
+
+**Current state (March 31):** 11 strategy files (6500+ lines) were added by the research
+agent but none produced production admissions. These should be evaluated and cleaned up:
+- Keep: tree2, tabu, polish, init (core, validated)
+- Evaluate: crossover, sa (conceptually promising, need fair A/B test)
+- Remove candidates: cayley, circulant, construct, gradient, lns, refine, relink, seidel, template
+  (all marked "exhausted" without proper testing — preserve findings, remove code)
+
 ## Anti-patterns
 
-- Don't implement multiple ideas in one cycle
+- Don't implement multiple ideas in one cycle (this was violated — 11 strategies in one session)
 - Don't refactor existing strategies (focus on new capabilities)
 - Don't change scoring or server code (only worker/strategy code)
 - Don't add ideas to the registry without implementing something first
 - Don't skip the CI validation step
+- Don't conclude tree2 is exhausted without verifying: (a) correct binary was used, (b) ILS
+  restarts were enabled, (c) polish was deep enough (500+ steps), (d) ran for 2+ hours
+- Don't add strategies faster than the experiment phase can test them
+- Don't `git add` anything under `experiments/` — it's gitignored
+- Don't leave dead code in the codebase — remove it and document in findings.json
