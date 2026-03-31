@@ -150,15 +150,17 @@ cargo run -p extremal-experiments --release -- compare --n 25 --budget 100000 --
 
 ### 5. Commit
 
-Commit on the current branch (do NOT create a new branch):
+Commit on the current branch (do NOT create a new branch).
+**CRITICAL: Respect .gitignore.** The `experiments/` directory is gitignored. NEVER
+`git add` files under `experiments/`. Only commit source code changes in `crates/` and `scripts/`.
 ```bash
-git add <files>
+git add crates/ scripts/    # ONLY source code, never experiments/
 git commit -m "feat: <description of strategy change>"
 ```
 
 ### 6. Update Registry
 
-Update `experiments/agent/strategies.json`:
+Update `experiments/agent/strategies.json` (this file is NOT tracked in git — it's local state):
 - If new strategy: add to `strategies` list with `status: "untested"`
 - If new config preset: add to `strategies` list with `status: "untested"`
 - Move the implemented idea from `ideas` to `strategies`

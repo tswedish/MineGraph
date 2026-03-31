@@ -30,6 +30,7 @@ cd "$(dirname "$0")/.."
 SERVER="https://api.extremal.online"
 MODE="auto"          # auto, research, experiment
 WORKERS=8
+N=35
 POLISH=100
 EXPERIMENT_INTERVAL="10m"
 EXPERIMENT_CYCLES=12  # how many experiment cycles before re-evaluating (~2 hours)
@@ -46,6 +47,7 @@ while [[ $# -gt 0 ]]; do
         --research)    MODE="research"; shift ;;
         --experiment)  MODE="experiment"; shift ;;
         --workers)     WORKERS="$2"; PASSTHROUGH_ARGS+=("$1" "$2"); shift 2 ;;
+        --n)           N="$2"; shift 2 ;;
         --polish)      POLISH="$2"; PASSTHROUGH_ARGS+=("$1" "$2"); shift 2 ;;
         --interval)    EXPERIMENT_INTERVAL="$2"; PASSTHROUGH_ARGS+=("$1" "$2"); shift 2 ;;
         --cycles)      EXPERIMENT_CYCLES="$2"; shift 2 ;;
@@ -239,7 +241,7 @@ RESEARCH_EOF
             # Launch fleet in background (without the loop part)
             # Generate campaign name from date + round
             CAMPAIGN_NAME="orch-$(date +%Y%m%d)-r${ROUND}"
-            ./scripts/agent-fleet.sh --workers "$WORKERS" --n 25 --polish "$POLISH" \
+            ./scripts/agent-fleet.sh --workers "$WORKERS" --n "$N" --polish "$POLISH" \
                 --server "$SERVER" --campaign "$CAMPAIGN_NAME" &
             FLEET_PID=$!
             sleep 35  # Wait for fleet warmup
