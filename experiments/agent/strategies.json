@@ -467,7 +467,24 @@
       "status": "untested",
       "date_implemented": "2026-03-31",
       "commit": "65038c6",
-      "notes": "Key for n=35: workers seed from rank #1 (4c=435) but beam search regresses to 4c=460. Seed polish explores the neighborhood of the seed's quality basin via tabu walk. Minimal overhead (~100 extra polish steps per round). Test with n=35 workers using polish_max_steps=200+ and polish_ils_restarts=3 for maximum effect."
+      "notes": "Key for n=35: workers seed from rank #1 (4c=435) but beam search regresses to 4c=460. Seed polish explores the neighborhood of the seed's quality basin via tabu walk. Prior fleet testing used polish_ils_restarts=0 (ILS disabled) so seed-polish was never properly tested. Commit 4ebb61b enables ILS by default (restarts=3). Re-test with 8 workers on n=35 to properly evaluate."
+    },
+    {
+      "id": "ils-default-enabled",
+      "type": "code_change",
+      "description": "Enable ILS restarts by default (0→3). All workers now do 3 perturbation+re-walk cycles per valid graph, expanding search from N to 4N effective polish steps.",
+      "files": [
+        "crates/extremal-worker/src/main.rs",
+        "scripts/agent-fleet.sh"
+      ],
+      "params": {
+        "polish_ils_restarts": "3 (default), 5 (deep-polish/deep-ils workers)",
+        "polish_ils_perturb": 3
+      },
+      "status": "untested",
+      "date_implemented": "2026-03-31",
+      "commit": "4ebb61b",
+      "notes": "ILS perturbation was implemented but disabled by default (restarts=0). All fleet workers including 'deep-ils' were running without ILS. This commit enables 3 restarts by default, giving 4x effective polish depth. Deep-polish (500 steps × 6 walks = 3000 effective) and deep-ils (300 steps × 6 walks = 1800 effective) workers now also explicitly pass --polish-ils-restarts 5. Fleet default N changed from 25 to 35. Critical for n=35 where 595-edge space needs wider neighborhood search to close gap from our 4c=(457,456) to competitor's 4c=(435,445)."
     }
   ],
   "ideas": [
